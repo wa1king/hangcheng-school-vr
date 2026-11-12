@@ -4,7 +4,7 @@
 
 从校门广场开始步行。课堂方位以从校门面向主楼为北。点东、南、西、北可直接看向对应方位，点左转、右转或按键盘左右方向键可转 90°。横向拖动也可转向。双指开合或滚轮可以缩放画面。
 
-用 WASD 或触屏摇杆移动。飞行时按 E 上升、Q 下降，也可用右侧升降按钮。
+用 WASD 或触屏摇杆移动。飞行时按 E 上升、Q 下降，也可用右侧升降按钮。游览范围沿校园围栏布置。从「前往」选择「校内西侧望路口」，可看到航空路与学子路的信号灯。
 
 从「前往」选择主教学翼、西侧活动楼、北侧教学楼或东南综合楼的入口，可以步行进楼、穿过走廊并沿楼梯到屋顶。楼内平面与主楼连廊是游览示意，教室陈设参考公开课堂照片。
 
@@ -20,12 +20,12 @@
 
 主界面左下角显示构建版本号。每次发布构建按北京时间自动生成 `YYYY.MM.DD-HHMMSS`。
 
-`tools/build_campus.py` 生成校舍 `campus.glb` 和周边街区 `surroundings.glb`。重新生成时需要 Python 3.11 或以上、NumPy、Pillow、Shapely、Mapbox Earcut 和 Windows 字体。分别使用 `npx gltfpack@1.3.0 -i public/scene/campus.glb -o public/scene/campus.packed.glb -cc -vpf -vp 16 -vt 16 -vn 10 -kn -km -ke`（周边模型替换文件名）压缩后，用压缩版替换对应的原始文件。渲染和碰撞读取同一份几何，教室窗玻璃双面可见且有碰撞。标线和标牌等表面装饰不参与碰撞。构建后将 `dist` 内容更新到 `docs` 并保留 `.nojekyll`。
+`tools/build_campus.py` 生成校舍 `campus.glb` 和周边街区 `surroundings.glb`。重新生成时需要 Python 3.11 或以上、NumPy、Pillow、Shapely、Mapbox Earcut 和 Windows 字体。分别使用 `npx gltfpack@1.3.0 -i public/scene/campus.glb -o public/scene/campus.packed.glb -cc -vpf -vp 16 -vt 16 -vn 10 -kn -km -ke`（周边模型替换文件名）压缩后，用压缩版替换对应的原始文件。校内渲染和碰撞读取同一份几何，教室窗玻璃双面可见且有碰撞。周边街区在首帧后加载，仅供观看。构建后将 `dist` 内容更新到 `docs` 并保留 `.nojekyll`。
 
 更新场景模型或主光后，运行 `node tools/bake-campus-light.mjs` 重新生成 `public/scene/campus-baked-light.bin`。它按 `scene.json` 对应的模型版本生成，浏览器在首帧后加载。
 
 ## 数据与署名
 
-[校园平面源数据](evidence/campus-osm.geojson)来自 © OpenStreetMap contributors，遵循 [ODbL 1.0](https://www.openstreetmap.org/copyright)。卫星影像和历史实拍用于核对外观。`tools/material_scans` 内的 Poly Haven 贴图经裁色和缩放，遵循 [CC0](https://polyhaven.com/license)。行道树使用 [Island Tree 03](https://polyhaven.com/a/island_tree_03) 的树叶和树皮贴图，人行道使用 [Floor Pavement](https://polyhaven.com/a/floor_pavement)。其余场景素材见[资料来源](public/scene/sources.html)。
+[校园平面](evidence/campus-osm.geojson)和[校外建筑轮廓](evidence/neighborhood-osm.geojson)来自 © OpenStreetMap contributors，遵循 [ODbL 1.0](https://www.openstreetmap.org/copyright)。卫星影像和历史实拍用于核对外观。`tools/material_scans` 内的 Poly Haven 贴图经裁色和缩放，遵循 [CC0](https://polyhaven.com/license)。行道树使用 [Island Tree 03](https://polyhaven.com/a/island_tree_03) 的树叶和树皮贴图，人行道使用 [Floor Pavement](https://polyhaven.com/a/floor_pavement)。其余场景素材见[资料来源](public/scene/sources.html)。
 
 [SimWorld 控制器许可](LICENSE.upstream) · [第三方软件许可](public/THIRD-PARTY-NOTICES.txt)

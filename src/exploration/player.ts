@@ -199,6 +199,7 @@ export async function createPlayerController(
   spawn: THREE.Vector3,
   avatarModel?: PlayerAvatar,
   repairMeshEdges = false,
+  travelLimit?: import('../campus-boundary.ts').CampusTravelLimit,
 ): Promise<PlayerController> {
   await preparePlayerPhysics();
   const { vertices, indices } = environmentCollision(environment);
@@ -497,17 +498,19 @@ export async function createPlayerController(
         }
         jumpBuffer = Math.max(0, jumpBuffer - FIXED_STEP);
         verticalSpeed = Math.max(-35, verticalSpeed - GRAVITY * FIXED_STEP);
+        const current = rigidBody.translation();
+        const allowed = travelLimit?.(current.x, current.z, current.x + displacement.x, current.z + displacement.z) ?? 1;
         controller.computeColliderMovement(collider, {
-          x: displacement.x,
+          x: displacement.x * allowed,
           y: verticalSpeed * FIXED_STEP,
-          z: displacement.z,
+          z: displacement.z * allowed,
         });
         const corrected = controller.computedMovement();
-        const current = rigidBody.translation();
+        const constrained = travelLimit?.(current.x, current.z, current.x + corrected.x, current.z + corrected.z) ?? 1;
         rigidBody.setNextKinematicTranslation({
-          x: current.x + corrected.x,
+          x: current.x + corrected.x * constrained,
           y: current.y + corrected.y,
-          z: current.z + corrected.z,
+          z: current.z + corrected.z * constrained,
         });
         stepWorld();
         grounded = controller.computedGrounded();

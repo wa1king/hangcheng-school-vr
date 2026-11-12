@@ -25,6 +25,7 @@ type CampusManifest = {
   collisionFromModels?: boolean;
   evidenceUrl?: string;
   landingBoundary?: PlanCoordinate[];
+  tourBoundary?: PlanCoordinate[];
   spawn: CampusPoint;
   overview?: { target: Coordinate; position: Coordinate };
   locations?: Location[];
@@ -123,6 +124,10 @@ export async function loadCampus() {
     || !manifest.landingBoundary.every(pair => Array.isArray(pair) && pair.length === 2 && pair.every(Number.isFinite)))) {
     throw new Error('校园可落地区域数据无效。');
   }
+  if (manifest.tourBoundary !== undefined && (!Array.isArray(manifest.tourBoundary) || manifest.tourBoundary.length < 3
+    || !manifest.tourBoundary.every(pair => Array.isArray(pair) && pair.length === 2 && pair.every(Number.isFinite)))) {
+    throw new Error('校园游览边界无效。');
+  }
   for (const model of manifest.models) {
     if (typeof model?.url !== 'string'
       || (model.position !== undefined && !validCoordinate(model.position))
@@ -140,13 +145,14 @@ export async function loadCampus() {
   const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
   const visuals = new Group();
   const collision = new Group();
+  const campusModels = manifest.models.filter(model => !model.surroundings);
   const [models, collisionAsset] = await Promise.all([
-    Promise.all(manifest.models.map(model => loader.loadAsync(modelURL(model.url)))),
+    Promise.all(campusModels.map(model => loadModel(model))),
     !manifest.collisionFromModels && manifest.collisionUrl
       ? loader.loadAsync(modelURL(manifest.collisionUrl)) : undefined,
   ]);
-  for (const [index, asset] of models.entries()) {
-    const config = manifest.models[index];
+  async function loadModel(config: Model) {
+    const asset = await loader.loadAsync(modelURL(config.url));
     const wrapper = new Group();
     if (config.position) wrapper.position.fromArray(config.position);
     wrapper.rotation.y = config.rotationY ?? 0;
@@ -158,8 +164,9 @@ export async function loadCampus() {
         node.userData.shadow = false;
       });
     }
-    visuals.add(wrapper);
+    return wrapper;
   }
+  for (const model of models) visuals.add(model);
 
   if (manifest.collisionFromModels) {
     collectMeshes(visuals, collision, structuralGeometry, true);
@@ -181,7 +188,6 @@ export async function loadCampus() {
     object.castShadow = object.userData.shadow !== false && materials.some(material => !material.transparent
       && (!material.name.startsWith('decal-') || material.alphaTest > 0));
     object.receiveShadow = object.userData.shadow !== false;
-    if (object.userData.surroundings) return;
     if (!object.geometry.boundingBox) object.geometry.computeBoundingBox();
     if (object.geometry.boundingBox) bounds.union(object.geometry.boundingBox.clone().applyMatrix4(object.matrixWorld));
   });
@@ -189,5 +195,12 @@ export async function loadCampus() {
   const size = bounds.getSize(new Vector3());
   const center = bounds.getCenter(new Vector3());
 
-  return { manifest, visuals, collision, bounds, size, center, manifestURL };
+  async function loadSurroundings() {
+    const context = new Group();
+    const models = await Promise.all(manifest.models.filter(model => model.surroundings).map(loadModel));
+    for (const model of models) context.add(model);
+    return context;
+  }
+
+  return { manifest, visuals, collision, bounds, size, center, manifestURL, loadSurroundings };
 }

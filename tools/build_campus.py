@@ -17,6 +17,7 @@ from shapely.geometry.polygon import orient
 
 from access import building_access
 from architecture import building, entrance, materials, slab
+from campus_perimeter import add_perimeter
 from entry_details import STAIR_CENTER, add_entry_details, entry_drain_opening
 from entry_greenery import detailed_tree, register_greenery
 from street_trees import register_street_trees, street_tree
@@ -25,6 +26,7 @@ from material_scans import apply_surface_materials
 from mesh import Mesh, rect, rounded
 from sports import add_sports
 from street_surfaces import build_street, ROADSIDE_TREE_X, ROADSIDE_TREE_Z
+from street_traffic import add_traffic
 from surroundings import add_surroundings
 
 
@@ -39,8 +41,8 @@ def site_to_world(x, y, z):
     return x * COS - z * SIN, y, x * SIN + z * COS
 
 
-def read_data():
-    with (BASE / 'evidence' / 'campus-osm.geojson').open(encoding='utf-8-sig') as file:
+def read_data(path=BASE / 'evidence' / 'campus-osm.geojson'):
+    with path.open(encoding='utf-8-sig') as file:
         data = json.load(file)
     lon, lat = data['campus_origin']
     latitude = math.radians(lat)
@@ -112,16 +114,7 @@ def landscape(visual, polygons, lines):
         z = rng.uniform(-86, 46)
         street_tree(visual, x, z, rng.uniform(4.8, 7.6), 183 + i, -0.25, distant=True)
 
-    # The courtyard and open entrance can be explored continuously from the road.
-    for x in (-83.4, -64.1, -45.7, -27.6, 48, 69, 87):
-        visual.box('terra', x, 0, 79.3, 0.42, 1.72, 0.42)
-        visual.box('cream', x, 1.72, 79.3, 0.46, 0.12, 0.46)
-    for a, b in ((-83, -28), (48, 87)):
-        visual.strip('curb', (a, 79.3), (b, 79.3), 0.22, 0, 0.28)
-        visual.strip('blue-rail', (a, 79.3), (b, 79.3), 0.05, 1.62, 0.05)
-        for i in range(round((b - a) / 0.19)):
-            x = a + i * 0.19
-            visual.box('blue-rail', x, 0.25, 79.3, 0.037, 1.36, 0.037)
+    add_perimeter(visual, campus, STAIR_CENTER)
 
 
 def garden_bench(mesh, x, z):
@@ -148,7 +141,8 @@ def manifest(dest, polygons):
             revision = file_digest(file, 'sha256').hexdigest()[:12]
         return f'./{name}?v={revision}'
 
-    places = [location('gate', '校门广场', STAIR_CENTER, 86.4, pitch=0.22),
+    places = [location('gate', '校门广场', STAIR_CENTER, 76.6, pitch=0.22),
+              location('west-street-view', '校内西侧望路口', -137, 74.5, math.pi, pitch=-.025),
               location('track', '田径场', -72.6, -22.1, -0.95),
               location('stands', '西侧看台', -92.0, -52.0, 0.97),
               location('courtyard', '教学楼中庭', 11.7, 10.7, math.pi),
@@ -164,16 +158,19 @@ def manifest(dest, polygons):
         x, z = access.point(0, -2.40)
         heading = math.atan2(access.dz, -access.dx)
         places.append(location(place_id, f'{access.label}入口', x, z, heading))
+    campus = Polygon(polygons[1084438083][0])
+    tour_boundary = campus.buffer(-.27, join_style='mitre')
     data = {
         'title': '深圳市宝安区航城学校',
         'status': '外观参考重建 · 室内布局示意',
-        'description': '航空路 10 号本部。课堂方位以从校门面向主楼为北。校舍外观参照开放地图和影像，楼内布局为游览示意。可进入教学楼，沿走廊和楼梯走到屋顶。',
+        'description': '航空路 10 号本部。课堂方位以从校门面向主楼为北。游览范围为校内，可进入教学楼，沿走廊和楼梯走到屋顶，也可在校内观察周边街景。楼内布局为游览示意。',
         'northYaw': round(-ANGLE, 8),
         'models': [{'url': resource('campus.glb')}, {'url': resource('surroundings.glb'), 'surroundings': True}],
         'collisionFromModels': True,
+        'tourBoundary': [[x, z] for x, _, z in (world(a, 0, b) for a, b in list(tour_boundary.exterior.coords)[:-1])],
         'evidenceUrl': './sources.html',
         'spawn': {key: places[0][key] for key in ('position', 'yaw', 'pitch')},
-        'overview': {'target': world(-20, 2, -14), 'position': world(111, 150, 174)},
+        'overview': {'target': world(-20, 2, -14), 'position': world(-20, 208, 14)},
         'locations': places,
     }
     (dest / 'scene.json').write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
@@ -196,7 +193,9 @@ def main(target=BASE / 'public' / 'scene'):
     target.mkdir(parents=True, exist_ok=True)
     count = visual.export(target / 'campus.glb')
     context = Mesh(site_to_world)
-    add_surroundings(context)
+    nearby, _ = read_data(BASE / 'evidence' / 'neighborhood-osm.geojson')
+    add_surroundings(context, nearby)
+    add_traffic(context, lines)
     context.export(target / 'surroundings.glb')
     manifest(target, polygons)
     print(f'Campus GLB: {count:,} triangles')

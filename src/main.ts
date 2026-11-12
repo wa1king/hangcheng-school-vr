@@ -1,9 +1,11 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { loadCampus, type CampusPoint } from './campus.ts';
+import { createCampusTravelLimit, type CampusTravelLimit } from './campus-boundary.ts';
 import { createCampusGroundReflection } from './campus-ground.ts';
 import { createCampusLighting } from './campus-lighting.ts';
 import { createCampusRenderer } from './campus-render.ts';
+import { createCampusTraffic } from './campus-traffic.ts';
 import { createInput, type Mode } from './input.ts';
 import { createLandingQuery } from './landing.ts';
 import { createXrLocomotion } from './xr-locomotion.ts';
@@ -47,13 +49,16 @@ const flightGoal = new THREE.Vector3();
 const xrLocomotion = createXrLocomotion();
 const point = new THREE.Vector3();
 const orbitOffset = new THREE.Vector3();
+const overviewAnchor = new THREE.Vector3();
 
 let mode: Mode = 'overview';
 let campus: Awaited<ReturnType<typeof loadCampus>> | undefined;
 let player: PlayerController | undefined;
+let travelLimit: CampusTravelLimit | undefined;
 let landingQuery: ReturnType<typeof createLandingQuery> | undefined;
 let renderer: THREE.WebGLRenderer;
 let lighting: ReturnType<typeof createCampusLighting> | undefined;
+let traffic: ReturnType<typeof createCampusTraffic>;
 let pavement: ReturnType<typeof createCampusGroundReflection> | undefined;
 let campusRenderer: ReturnType<typeof createCampusRenderer>;
 let heading = 0;
@@ -84,6 +89,7 @@ orbit.minDistance = 5;
 orbit.zoomSpeed = .95;
 orbit.enableRotate = false;
 orbit.enablePan = true;
+orbit.screenSpacePanning = false;
 
 function setHeading(next: number) {
   if (!finished || xrSession || next === heading) return;
@@ -167,7 +173,23 @@ function orientOverview() {
   const distance = Math.hypot(camera.position.x - orbit.target.x, camera.position.z - orbit.target.z);
   camera.position.x = orbit.target.x + Math.sin(yaw) * distance;
   camera.position.z = orbit.target.z + Math.cos(yaw) * distance;
-  orbit.update();
+  updateOverview();
+}
+
+function constrainTravel(from: THREE.Vector3, to: THREE.Vector3) {
+  const fraction = travelLimit?.(from.x, from.z, to.x, to.z) ?? 1;
+  to.x = from.x + (to.x - from.x) * fraction;
+  to.z = from.z + (to.z - from.z) * fraction;
+}
+
+function updateOverview(dt?: number) {
+  orbit.update(dt);
+  if (!travelLimit) return;
+  point.copy(orbit.target);
+  constrainTravel(overviewAnchor, orbit.target);
+  camera.position.add(point.subVectors(orbit.target, point));
+  constrainTravel(orbit.target, camera.position);
+  camera.lookAt(orbit.target);
 }
 
 function showOverview() {
@@ -181,9 +203,12 @@ function showOverview() {
     orbit.target.copy(campus.center);
     camera.position.copy(campus.center).add(point.set(span * .55, span * .65, span * .68));
   }
+  overviewAnchor.copy(orbit.target);
   camera.position.copy(orbitOffset.subVectors(camera.position, orbit.target).multiplyScalar(overviewScale(camera.aspect)).add(orbit.target));
   orbit.minDistance = Math.max(3, span * .025);
-  orbit.maxDistance = Math.max(span * 3, camera.position.distanceTo(orbit.target) * 1.6);
+  orbit.maxDistance = travelLimit
+    ? camera.position.distanceTo(orbit.target) * 1.6
+    : Math.max(span * 3, camera.position.distanceTo(orbit.target) * 1.6);
   orientOverview();
 }
 
@@ -312,8 +337,10 @@ function resize() {
   if (campus && mode === 'overview') {
     const scale = overviewScale(camera.aspect) / previousScale;
     camera.position.copy(orbitOffset.subVectors(camera.position, orbit.target).multiplyScalar(scale).add(orbit.target));
-    orbit.maxDistance = Math.max(orbit.maxDistance, camera.position.distanceTo(orbit.target) * 1.6);
-    orbit.update();
+    orbit.maxDistance = travelLimit
+      ? orbit.maxDistance * scale
+      : Math.max(orbit.maxDistance, camera.position.distanceTo(orbit.target) * 1.6);
+    updateOverview();
   }
   if (!renderer || xrSession) return;
   renderer.setPixelRatio(Math.min(devicePixelRatio, input.touch ? 1.5 : 2));
@@ -339,11 +366,15 @@ function moveFlat(dt: number) {
   const usesModelCollision = campus.manifest.collisionFromModels && player;
   const padding = usesModelCollision ? 0 : Math.max(25, Math.max(campus.size.x, campus.size.z) * .4);
   flightGoal.copy(flightFeet).addScaledVector(direction, dt * speed);
-  if (!usesModelCollision) {
+  if (travelLimit) {
+    constrainTravel(flightFeet, flightGoal);
+  } else if (!usesModelCollision) {
     flightGoal.x = THREE.MathUtils.clamp(flightGoal.x, campus.bounds.min.x - padding, campus.bounds.max.x + padding);
     flightGoal.z = THREE.MathUtils.clamp(flightGoal.z, campus.bounds.min.z - padding, campus.bounds.max.z + padding);
   }
-  flightFeet.copy(player?.constrainFlight(flightFeet, flightGoal) ?? flightGoal);
+  flightGoal.copy(player?.constrainFlight(flightFeet, flightGoal) ?? flightGoal);
+  constrainTravel(flightFeet, flightGoal);
+  flightFeet.copy(flightGoal);
   flightGoal.copy(flightFeet);
   flightGoal.y += lift * speed * dt;
   if (!usesModelCollision) {
@@ -363,6 +394,13 @@ function moveXR(dt: number, frame?: XRFrame) {
   if (player.grounded) lastSafeFeet.copy(player.position);
   if (campus && player.position.y < campus.bounds.min.y - 8) player.teleport(lastSafeFeet);
   rig.position.copy(player.position);
+  if (travelLimit) {
+    const head = viewerPose.transform.position;
+    point.set(head.x, 0, head.z).applyAxisAngle(camera.up, rig.rotation.y);
+    const fraction = travelLimit(player.position.x, player.position.z,
+      player.position.x + point.x, player.position.z + point.z);
+    rig.position.addScaledVector(point, fraction - 1);
+  }
 }
 
 async function initializeVR() {
@@ -411,11 +449,12 @@ function frame(time: number, xrFrame?: XRFrame) {
   lastFrame = time;
   if (finished) {
     if (xrSession) moveXR(dt, xrFrame);
-    else if (mode === 'overview') orbit.update(dt);
+    else if (mode === 'overview') updateOverview(dt);
     else moveFlat(dt);
   }
   const feet = mode === 'walk' ? player?.position : mode === 'fly' ? flightFeet : undefined;
   lighting?.update(mode, feet, firstFramePresented, dt);
+  traffic?.(time);
   pavement?.update(camera, time, finished && mode === 'walk');
   if (finished && mode !== 'overview' && !input.touch && !renderer.xr.isPresenting && campusRenderer) {
     campusRenderer.render(scene, camera);
@@ -425,6 +464,13 @@ function frame(time: number, xrFrame?: XRFrame) {
   if (!firstFramePresented) {
     firstFramePresented = true;
     notice.hidden = true;
+    if (campus) {
+      const visuals = campus.visuals;
+      void campus.loadSurroundings().then(context => {
+        visuals.add(context);
+        traffic = createCampusTraffic(context);
+      }).catch(error => console.warn('校园周边场景载入失败', error));
+    }
   }
   if (debug) {
     const coords = camera.position.toArray().map(value => value.toFixed(2)).join(', ');
@@ -483,6 +529,7 @@ async function initialize() {
     fullscreen.hidden = !document.fullscreenEnabled;
 
     campus = await loadCampus();
+    if (campus.manifest.tourBoundary) travelLimit = createCampusTravelLimit(campus.manifest.tourBoundary);
     scene.add(campus.visuals);
     lighting = createCampusLighting(scene, camera, renderer, campus, input.touch);
     pavement = createCampusGroundReflection(renderer, scene, campus.visuals, groundReflections && !input.touch);
@@ -496,6 +543,7 @@ async function initialize() {
           new THREE.Vector3().fromArray(campus.manifest.spawn.position),
           { object: new THREE.Group(), updateMotion() {}, dispose() {} },
           campus.manifest.collisionFromModels,
+          travelLimit,
         );
         if (!campus.manifest.collisionFromModels && campus.manifest.landingBoundary) {
           landingQuery = createLandingQuery(campus.collision, campus.manifest.landingBoundary);
