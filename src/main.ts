@@ -31,12 +31,16 @@ const lastOrientation = new THREE.Quaternion();
 const xrLocomotion = createXrLocomotion();
 const point = new THREE.Vector3();
 const orbitOffset = new THREE.Vector3();
+const sunOffset = new THREE.Vector3();
+const shadowFocus = new THREE.Vector3();
 
 let mode: Mode = 'overview';
 let campus: Awaited<ReturnType<typeof loadCampus>> | undefined;
 let player: PlayerController | undefined;
 let landingQuery: ReturnType<typeof createLandingQuery> | undefined;
 let renderer: THREE.WebGLRenderer;
+let sun: THREE.DirectionalLight | undefined;
+let activeShadowRadius = 0;
 let yaw = 0;
 let pitch = 0;
 let savedWalkYaw = 0;
@@ -244,20 +248,42 @@ function lightCampus() {
   backdrop.rotation.x = -Math.PI / 2;
   backdrop.position.set(campus.center.x, campus.bounds.min.y - .36, campus.center.z);
   scene.add(backdrop);
-  const sky = new THREE.HemisphereLight('#e8f2fc', '#a9a189', 2.05);
-  const sun = new THREE.DirectionalLight('#fff0d5', 2.9);
-  sun.position.copy(campus.center).add(point.set(-span * .7, span * .95, -span * .48));
-  sun.target.position.copy(campus.center);
+  const sky = new THREE.HemisphereLight('#e8f2fc', '#a9a189', 1.75);
+  sun = new THREE.DirectionalLight('#fff0d5', 2.85);
+  sunOffset.set(-span * .7, span * .95, -span * .48);
   sun.castShadow = true;
   const shadowSize = input.touch ? 1024 : 2048;
   sun.shadow.mapSize.set(shadowSize, shadowSize);
-  const radius = Math.max(campus.size.length() * .55, 15);
-  Object.assign(sun.shadow.camera, { left: -radius, right: radius, top: radius, bottom: -radius, near: .1, far: span * 3.6 });
-  sun.shadow.camera.updateProjectionMatrix();
-  sun.shadow.bias = -.00015;
-  sun.shadow.normalBias = .10;
-  sun.shadow.intensity = .65;
+  sun.shadow.intensity = .82;
   scene.add(sky, sun, sun.target);
+  updateSunShadow();
+}
+
+function updateSunShadow() {
+  if (!campus || !sun) return;
+  const nearPlayer = mode === 'walk' && player;
+  const radius = nearPlayer ? 32 : Math.max(campus.size.length() * .55, 15);
+  shadowFocus.copy(campus.center);
+  if (nearPlayer) {
+    // Refresh only when crossing a cell so walking does not redraw the map every frame.
+    const { x, y, z } = nearPlayer.position;
+    shadowFocus.set(Math.round(x / 10) * 10, Math.round(y / 10) * 10, Math.round(z / 10) * 10);
+  }
+  if (activeShadowRadius === radius && sun.target.position.equals(shadowFocus)) return;
+  sun.target.position.copy(shadowFocus);
+  sun.position.copy(shadowFocus).add(sunOffset);
+  if (activeShadowRadius !== radius) {
+    activeShadowRadius = radius;
+    const distance = sunOffset.length();
+    const depth = radius * 2.2;
+    Object.assign(sun.shadow.camera, {
+      left: -radius, right: radius, top: radius, bottom: -radius,
+      near: Math.max(.1, distance - depth), far: distance + depth,
+    });
+    sun.shadow.camera.updateProjectionMatrix();
+    sun.shadow.bias = nearPlayer ? -.00025 : -.00015;
+    sun.shadow.normalBias = nearPlayer ? .035 : .10;
+  }
   renderer.shadowMap.needsUpdate = true;
 }
 
@@ -363,6 +389,7 @@ function frame(time: number, xrFrame?: XRFrame) {
     if (xrSession) moveXR(dt, xrFrame);
     else if (mode === 'overview') orbit.update(dt);
     else moveFlat(dt);
+    updateSunShadow();
   }
   renderer.render(scene, camera);
   if (debug) {

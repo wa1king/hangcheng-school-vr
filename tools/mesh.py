@@ -55,8 +55,8 @@ class Mesh:
         self.materials = {}
         self.transform = transform
 
-    def material(self, name, rgb, roughness=0.85, metallic=0.0, texture=None, double=False):
-        self.materials[name] = (rgb, roughness, metallic, texture, double)
+    def material(self, name, rgb, roughness=0.85, metallic=0.0, texture=None, double=False, normal=None):
+        self.materials[name] = (rgb, roughness, metallic, texture, double, normal)
 
     def face(self, mat, vertices, triangles=None, uv=None):
         points = [self.transform(*p) for p in vertices]
@@ -157,19 +157,28 @@ class Mesh:
             gltf['accessors'].append(definition)
             return len(gltf['accessors']) - 1
 
+        texture_indices = {}
+
+        def add_texture(texture):
+            if texture not in texture_indices:
+                gltf['images'].append({'bufferView': view(texture[0]), 'mimeType': texture[1]})
+                gltf['textures'].append({'source': len(gltf['images']) - 1, 'sampler': 0})
+                texture_indices[texture] = len(gltf['textures']) - 1
+            return texture_indices[texture]
+
         for name, (pos, norms, uv, inds) in self.batches.items():
             if not inds:
                 continue
-            rgb, rough, metal, texture, double = self.materials[name]
+            rgb, rough, metal, texture, double, normal = self.materials[name]
             pbr = {'baseColorFactor': [*(srgb(v) for v in rgb), 1], 'roughnessFactor': rough, 'metallicFactor': metal}
             material = {'name': name, 'doubleSided': double, 'pbrMetallicRoughness': pbr}
             if texture:
-                gltf['images'].append({'bufferView': view(texture[0]), 'mimeType': texture[1]})
-                gltf['textures'].append({'source': len(gltf['images']) - 1, 'sampler': 0})
-                pbr['baseColorTexture'] = {'index': len(gltf['textures']) - 1}
+                pbr['baseColorTexture'] = {'index': add_texture(texture)}
                 if texture[1] == 'image/png':
                     material['alphaMode'] = 'MASK'
                     material['alphaCutoff'] = 0.35
+            if normal:
+                material['normalTexture'] = {'index': add_texture(normal), 'scale': 0.55}
             gltf['materials'].append(material)
             gltf['meshes'][0]['primitives'].append({
                 'attributes': {'POSITION': accessor(pos, 3, bounds=True), 'NORMAL': accessor(norms, 3), 'TEXCOORD_0': accessor(uv, 2)},

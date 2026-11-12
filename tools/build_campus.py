@@ -4,6 +4,7 @@ import json
 import math
 import random
 import sys
+from hashlib import file_digest
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parents[1]
@@ -14,6 +15,7 @@ if EXTRA.is_dir():
 from shapely.geometry import LineString, Point, Polygon, box
 
 from architecture import building, entrance, foliage, materials, slab
+from interiors import PORTAL_Z
 from mesh import Mesh, rect, rounded
 from sports import add_sports
 
@@ -22,6 +24,7 @@ ANGLE = math.radians(-24)
 COS, SIN = math.cos(ANGLE), math.sin(ANGLE)
 WGS84_RADIUS = 6378137
 WGS84_E2 = 0.00669437999014
+TEACHING_FLOOR_HEIGHT = 4.02
 
 
 def site_to_world(x, y, z):
@@ -132,21 +135,28 @@ def manifest(dest, campus_outline):
     def world(x, y, z):
         return [round(value, 3) for value in site_to_world(x, y, z)]
 
-    def location(ident, label, x, z, direction=0, pitch=0):
-        return {'id': ident, 'label': label, 'position': world(x, 0, z), 'yaw': round(direction - ANGLE, 5), 'pitch': pitch}
+    def location(ident, label, x, z, direction=0, pitch=0, y=0):
+        return {'id': ident, 'label': label, 'position': world(x, y, z), 'yaw': round(direction - ANGLE, 5), 'pitch': pitch}
+
+    def resource(name):
+        with (dest / name).open('rb') as file:
+            revision = file_digest(file, 'sha256').hexdigest()[:12]
+        return f'./{name}?v={revision}'
 
     places = [location('gate', '校门广场', 11, 86.4, -0.13, 0.22),
               location('track', '田径场', -72.6, -22.1, -0.95),
               location('stands', '西侧看台', -92.0, -52.0, 0.97),
               location('courtyard', '教学楼中庭', 11.7, 10.7, math.pi),
+              location('teaching-entrance', '教学楼室内示意入口', 20.2, PORTAL_Z, -math.pi / 2),
+              location('teaching-upper', '二层示意走廊', 25.55, 3.30, y=TEACHING_FLOOR_HEIGHT),
               location('east', '东侧教学楼', 41, 62.5, -1.34),
               location('basketball', '北侧球场', 27.0, -62.7)]
     data = {
         'title': '深圳市宝安区航城学校',
-        'status': '实景参考重建 · 尺寸待实测',
-        'description': '航空路 10 号本部。平面和屋顶分区参照开放地图与近期影像，北侧主楼体量有影长估计，建筑尺寸仍待实测。',
-        'models': [{'url': './campus.glb'}],
-        'collisionUrl': './collision.glb',
+        'status': '外观参考重建 · 室内布局示意',
+        'description': '航空路 10 号本部。校舍外观参照开放地图和影像，建筑尺寸待实测。可从中庭走进示意教学区，沿走廊和楼梯进入两层教室。',
+        'models': [{'url': resource('campus.glb')}],
+        'collisionUrl': resource('collision.glb'),
         'evidenceUrl': './sources.html',
         'spawn': {key: places[0][key] for key in ('position', 'yaw', 'pitch')},
         'landingBoundary': [[wx, wz] for wx, _, wz in (world(x, 0, z) for x, z in campus_outline[:-1])],
@@ -156,19 +166,18 @@ def manifest(dest, campus_outline):
     (dest / 'scene.json').write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 
 
-def main():
+def main(target=BASE / 'public' / 'scene'):
     polygons, lines = read_data()
     visual, collision = Mesh(site_to_world), Mesh(site_to_world)
     materials(visual)
     collision.material('collider', (128, 128, 128), double=True)
     collision.material('walkable', (128, 128, 128), double=True)
     landscape(visual, collision, polygons, lines)
-    for ident, floors, height in ((19808442, 4, 4.02), (1448555207, 1, 4.6),
+    for ident, floors, height in ((19808442, 4, TEACHING_FLOOR_HEIGHT), (1448555207, 1, 4.6),
                                    (1448555203, 5, 3.61), (1448555206, 8, 3.46)):
         building(visual, collision, polygons[ident], ident, floors, height)
     entrance(visual, collision)
     add_sports(visual, collision, polygons)
-    target = BASE / 'public' / 'scene'
     target.mkdir(parents=True, exist_ok=True)
     count = visual.export(target / 'campus.glb')
     colliders = collision.export(target / 'collision.glb')

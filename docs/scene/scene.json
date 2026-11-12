@@ -1,13 +1,13 @@
 {
   "title": "深圳市宝安区航城学校",
-  "status": "实景参考重建 · 尺寸待实测",
-  "description": "航空路 10 号本部。平面和屋顶分区参照开放地图与近期影像，北侧主楼体量有影长估计，建筑尺寸仍待实测。",
+  "status": "外观参考重建 · 室内布局示意",
+  "description": "航空路 10 号本部。校舍外观参照开放地图和影像，建筑尺寸待实测。可从中庭走进示意教学区，沿走廊和楼梯进入两层教室。",
   "models": [
     {
-      "url": "./campus.glb"
+      "url": "./campus.glb?v=1f835dd5b795"
     }
   ],
-  "collisionUrl": "./collision.glb",
+  "collisionUrl": "./collision.glb?v=d73e19bf56bc",
   "evidenceUrl": "./sources.html",
   "spawn": {
     "position": [
@@ -119,6 +119,28 @@
         5.016
       ],
       "yaw": 3.56047,
+      "pitch": 0
+    },
+    {
+      "id": "teaching-entrance",
+      "label": "教学楼室内示意入口",
+      "position": [
+        23.945,
+        0,
+        4.117
+      ],
+      "yaw": -1.15192,
+      "pitch": 0
+    },
+    {
+      "id": "teaching-upper",
+      "label": "二层示意走廊",
+      "position": [
+        24.683,
+        4.02,
+        -7.377
+      ],
+      "yaw": 0.41888,
       "pitch": 0
     },
     {
