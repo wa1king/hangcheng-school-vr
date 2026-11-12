@@ -303,14 +303,14 @@ export async function createPlayerController(
     }
   };
 
-  const sweep = (from: THREE.Vector3, to: THREE.Vector3, shape: RAPIER.Shape) => {
+  const sweep = (from: THREE.Vector3, to: THREE.Vector3, shape: RAPIER.Shape, stopAtPenetration = true) => {
     sweepResult.copy(to);
     if (disposed) return sweepResult;
     sweepDirection.subVectors(to, from);
     const length = sweepDirection.length();
     if (length < 0.0001) return sweepResult;
     sweepDirection.divideScalar(length);
-    const hit = world.castShape(from, unrotated, sweepDirection, shape, .005, length, true,
+    const hit = world.castShape(from, unrotated, sweepDirection, shape, .005, length, stopAtPenetration,
       RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, undefined, collider, driving ? vehicles.bodyFor(driving.id) : undefined);
     if (hit) sweepResult.copy(from).addScaledVector(sweepDirection, Math.max(0, hit.time_of_impact - .01));
     return sweepResult;
@@ -560,7 +560,8 @@ export async function createPlayerController(
       flightCenter.y += CHARACTER_HALF_HEIGHT;
       const desiredCenter = constrainedFlightCenter.copy(desiredFeet);
       desiredCenter.y += CHARACTER_HALF_HEIGHT;
-      const result = sweep(flightCenter, desiredCenter, capsuleShape);
+      // A capsule touching the floor must be able to move away from it at takeoff.
+      const result = sweep(flightCenter, desiredCenter, capsuleShape, false);
       result.y -= CHARACTER_HALF_HEIGHT;
       return result;
     },

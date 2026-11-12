@@ -4,10 +4,10 @@
   "description": "航空路 10 号本部。校舍外观参照开放地图和影像，建筑尺寸待实测。可从中庭走进示意教学区，沿走廊和楼梯进入两层教室。",
   "models": [
     {
-      "url": "./campus.glb?v=1f835dd5b795"
+      "url": "./campus.glb?v=24ab088475db"
     }
   ],
-  "collisionUrl": "./collision.glb?v=d73e19bf56bc",
+  "collisionUrl": "./collision.glb?v=1dbe9294966b",
   "evidenceUrl": "./sources.html",
   "spawn": {
     "position": [

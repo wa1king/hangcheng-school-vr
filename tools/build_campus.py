@@ -89,7 +89,7 @@ def landscape(visual, collision, polygons, lines):
 
     # Low planting and broad canopy positions are inferred from the exterior references.
     bed_positions = [(-59, 48, 26, 8), (-29, 48, 14, 6), (-68, 57, 23, 4),
-                     (-9, 44, 5.7, 5.4), (28, 45.5, 5.4, 6.2), (37, 70.2, 7.7, 4.8),
+                     (37, 70.2, 7.7, 4.8),
                      (10.5, 3.5, 14, 9.1), (56, -2.6, 22, 5.5), (57, 23, 15, 5.2),
                      (-3.5, -52.3, 12, 4.4), (39, -56.8, 28, 3.7), (65, -51, 14, 4.6)]
     rng = random.Random(18)

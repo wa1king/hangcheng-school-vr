@@ -111,27 +111,43 @@ def courtyard_wall(mesh, collision, edge, y, top, level):
     def x_at(z):
         return a[0] + (b[0] - a[0]) * (z - a[1]) / (b[1] - a[1]) + 0.085
 
-    sections = [-13.1, -10.5, -6.85, -3.20, 0.45, 4.10, 7.75, 10.75, 12.25, 14.75, 16.25]
+    ground = level == 0
+    portal_start = PORTAL_Z - PORTAL_WIDTH / 2
+    portal_end = PORTAL_Z + PORTAL_WIDTH / 2
+    beam_bottom = 2.98 if ground else 3.10
+    # Broad arcade bays use one structural pier at each joint.
+    if ground:
+        sections = (WING_NORTH, -9.05, -4.95, -0.85, 3.25, 7.35, portal_start, portal_end, WING_SOUTH)
+    else:
+        sections = tuple(WING_NORTH + (WING_SOUTH - WING_NORTH) * bay / 7 for bay in range(8))
+    wall_along_z(mesh, collision, x_at, WING_NORTH, WING_SOUTH, y + beam_bottom, top, 0.30, 'beige')
+    for z in sections:
+        z = min(WING_SOUTH - 0.17, max(WING_NORTH + 0.17, z))
+        solid(mesh, collision, 'terra' if ground else 'cream',
+              x_at(z) + 0.025, y, z, 0.48 if ground else 0.42, beam_bottom, 0.34)
+
+    if ground:
+        # A low terrace edge between the pillars leaves the covered walk open above it.
+        for start, end in ((WING_NORTH, portal_start), (portal_end, WING_SOUTH)):
+            wall_along_z(mesh, collision, x_at, start, end, y, y + 0.48, 0.21, 'terra')
+            segment(mesh, 'cream', (x_at(start), start), (x_at(end), end), y + 0.48, 0.045, 0.24)
+        mesh.strip('stair-stone', (x_at(portal_start), portal_start), (x_at(portal_end), portal_end), 0.54, y + 0.026)
+        label(mesh, 'teaching-sign-entry', x_at(PORTAL_Z) - 0.157, PORTAL_Z, y + 3.09, 1.85, 0.39)
+        return
+
+    # Waist-height guard behind the slab edge keeps the courtyard view open.
+    wall_along_z(mesh, collision, x_at, WING_NORTH, WING_SOUTH, y, y + 0.29, 0.24, 'beige')
+    segment(mesh, 'cream', (x_at(WING_NORTH), WING_NORTH), (x_at(WING_SOUTH), WING_SOUTH), y + 0.29, 0.045, 0.30)
     for start, end in zip(sections, sections[1:]):
-        material = 'terra' if level == 0 else 'beige'
-        if start == PORTAL_Z - PORTAL_WIDTH / 2 and level == 0:
-            wall_along_z(mesh, collision, x_at, start, end, y + 2.88, top, 0.30, 'beige')
-            for z in (start + 0.075, end - 0.075):
-                mesh.box('teaching-metal', x_at(z), y, z, 0.27, 2.88, 0.105)
-            mesh.strip('stair-stone', (x_at(start), start), (x_at(end), end), 0.54, y + 0.026)
-            label(mesh, 'teaching-sign-entry', x_at(PORTAL_Z) - 0.157, PORTAL_Z, y + 3.09, 1.85, 0.39)
-            continue
-        # Solid sills and piers cast shadows into the otherwise open gallery.
-        wall_along_z(mesh, collision, x_at, start, end, y, y + 1.02, 0.25, material)
-        wall_along_z(mesh, collision, x_at, start, end, y + 2.75, top, 0.27, 'beige')
-        for z in (start + 0.10, end - 0.10):
-            solid(mesh, collision, 'cream', x_at(z) + 0.025, y + 1.02, z, 0.42, 1.73, 0.22)
-        segment(mesh, 'cream', (x_at(start), start), (x_at(end), end), y + 1.02, 0.065, 0.38)
-        for bar in range(1, math.ceil((end - start) / 0.23)):
-            z = start + (end - start) * bar / math.ceil((end - start) / 0.23)
-            mesh.box('blue-rail', x_at(z), y + 1.075, z, 0.031, 1.69, 0.027)
-        segment(mesh, 'blue-cap', (x_at(start), start), (x_at(end), end), y + 1.61, 0.045, 0.045)
-        segment(collision, 'collider', (x_at(start), start), (x_at(end), end), y + 1.02, 1.73, 0.12)
+        rail_start, rail_end = start + 0.13, end - 0.13
+        rail_a, rail_b = (x_at(rail_start) + 0.055, rail_start), (x_at(rail_end) + 0.055, rail_end)
+        segment(mesh, 'blue-cap', rail_a, rail_b, y + 1.015, 0.045, 0.05)
+        bars = math.ceil((rail_end - rail_start) / 0.17)
+        for bar in range(1, bars):
+            z = rail_start + (rail_end - rail_start) * bar / bars
+            mesh.box('blue-rail', x_at(z) + 0.055, y + 0.335, z, 0.028, 0.68, 0.027)
+    segment(collision, 'collider', (x_at(WING_NORTH) + 0.055, WING_NORTH),
+            (x_at(WING_SOUTH) + 0.055, WING_SOUTH), y + 0.29, 0.77, 0.12)
 
 
 def corridor_partition(mesh, collision, north, south, door_z, y, top, sign, with_window=True):

@@ -9,6 +9,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from shapely.geometry import LineString, Point, Polygon, box
 from shapely.geometry.polygon import orient
+from shapely.ops import unary_union
 
 from mesh import rect, rounded
 
@@ -214,13 +215,26 @@ def panels(mesh, a, b, floor, count, inset, mode, seed, floor_height=4.02):
         front, depth, low, high, divisions = inset - 0.24, 0.215, 0.92, 2.66, 3
     elif mode == 'terracotta':
         front, depth, low, high, divisions = 0.025, 0.25, 0.82, 2.65, 3
+    elif mode == 'classroom':
+        front, depth, low, high, divisions = 0.065, 0.29, 0.88, 2.72, 3
     else:
         # The upper hall is a solid volume, so its frames sit in front of the wall.
         front, depth, low, high, divisions = -0.11, 0.08, 0.92, 2.67, 3
     for bay in range(count):
         bay_a, bay_b = position(a, b, bay / count, front), position(a, b, (bay + 1) / count, front)
+        if mode == 'corridor' and bay % 3 == 1:
+            door_a = position(bay_a, bay_b, 0.19)
+            door_b = position(bay_a, bay_b, min(0.19 + 0.96 * count / length, 0.68))
+            line_rect(mesh, 'beige', bay_a, door_a, floor, floor_height)
+            line_rect(mesh, 'beige', door_b, bay_b, floor, floor_height)
+            line_rect(mesh, 'beige', door_a, door_b, floor + 2.24, floor_height - 2.24)
+            window_opening(mesh, door_a, door_b, floor, floor + 2.24, depth, 'door', 1)
+            continue
         edge = min((0.18 if mode == 'fins' else 0.42) * count / length, 0.24)
-        left, right = position(bay_a, bay_b, edge), position(bay_a, bay_b, 1 - edge)
+        # The entrance fins occur in groups separated by wider masonry piers.
+        group_gap = 0.11 if mode == 'fins' else 0
+        left = position(bay_a, bay_b, edge + (group_gap if bay % 5 == 0 else 0))
+        right = position(bay_a, bay_b, 1 - edge - (group_gap if (bay + 1) % 5 == 0 else 0))
         glazing = rng.choice(('glass-dusk', 'glass-dusk', 'glass-light', 'glass-deep'))
         material = 'terra' if mode == 'terracotta' else 'beige'
         if mode != 'windows':
@@ -231,15 +245,9 @@ def panels(mesh, a, b, floor, count, inset, mode, seed, floor_height=4.02):
         window_opening(mesh, left, right, floor + low, floor + high, depth, glazing, divisions)
         if mode == 'fins':
             mesh.strip('cream', bay_a, left, 0.20, floor + 0.18, height - 0.36)
-        if mode == 'corridor' and bay % 3 == 1:
-            # Recessed back-wall door, behind the open gallery's column line.
-            door_a = position(bay_a, bay_b, 0.10, -0.011)
-            door_b = position(bay_a, bay_b, min(0.10 + 0.92 * count / length, 0.66), -0.011)
-            line_rect(mesh, 'door', door_a, door_b, floor + 0.02, 2.17)
-            mesh.strip('frame', door_a, door_b, 0.05, floor + 2.18, 0.045)
 
 
-def ribbon_windows(mesh, a, b, floor, index, floor_height=3.46):
+def ribbon_windows(mesh, a, b, floor, floor_height=3.46):
     length = math.dist(a, b)
     gap = min(0.085 / length, 0.18)
     left, right = position(a, b, gap, 0.12), position(a, b, 1 - gap, 0.12)
@@ -251,22 +259,85 @@ def ribbon_windows(mesh, a, b, floor, index, floor_height=3.46):
     window_opening(mesh, left, right, floor + low, floor + high, 0.22, 'glass-ribbon', max(1, round(length / 0.72)))
 
 
-def corridor_rail(mesh, a, b, y):
+def corridor_rail(mesh, collision, a, b, y):
     outside_a, outside_b = position(a, b, 0, 0.065), position(a, b, 1, 0.065)
-    mesh.strip('beige', outside_a, outside_b, 0.13, y - 0.18, 0.50)
-    mesh.strip('sill', outside_a, outside_b, 0.16, y + 0.32, 0.045)
-    mesh.strip('blue-cap', outside_a, outside_b, 0.057, y + 0.985, 0.044)
-    spacing = max(1, round(math.dist(a, b) / 0.19))
+    mesh.strip('beige', outside_a, outside_b, 0.14, y - 0.25, 0.51)
+    mesh.strip('sill', outside_a, outside_b, 0.18, y + 0.26, 0.046)
+    rail_a, rail_b = position(a, b, 0, 0.16), position(a, b, 1, 0.16)
+    mesh.strip('blue-cap', rail_a, rail_b, 0.052, y + 0.994, 0.046)
+    collision.strip('collider', rail_a, rail_b, 0.10, y, 1.04)
+    length = math.dist(a, b)
+    spacing = max(1, round(length / 0.17))
     for index in range(1, spacing):
         t = index / spacing
         if index % 6 == 0:
-            x, z = position(outside_a, outside_b, t)
-            mesh.box('blue-rail', x, y + 0.35, z, 0.04, 0.64, 0.04)
+            x, z = position(rail_a, rail_b, t)
+            mesh.box('blue-rail', x, y + 0.30, z, 0.038, 0.70, 0.038)
         else:
-            margin = 0.012 / math.dist(a, b)
-            left = position(outside_a, outside_b, t - margin)
-            right = position(outside_a, outside_b, t + margin)
-            line_rect(mesh, 'blue-rail', left, right, y + 0.35, 0.64)
+            margin = 0.010 / length
+            left = position(rail_a, rail_b, t - margin)
+            right = position(rail_a, rail_b, t + margin)
+            line_rect(mesh, 'blue-rail', left, right, y + 0.30, 0.70)
+
+
+def entrance_wing(a, b):
+    x, z = position(a, b, 0.5)
+    return abs(a[0] - b[0]) < 1.5 and 36 < z < 64 and (-3.5 < x < -1.0 or 23.5 < x < 26.0)
+
+
+def facade_type(ident, courtyard, a, b):
+    x, z = position(a, b, 0.5)
+    if ident == 1448555206:
+        return 'corridor' if 57.5 < x < 81 and 40 < z < 61 else 'ribbon'
+    if ident == 1448555203:
+        return 'terracotta'
+    if ident == 1448555207:
+        return 'classroom'
+    if courtyard or entrance_wing(a, b):
+        return 'fins'
+    # The older photos show the open arcade around the curved entrance ends,
+    # along the road frontage and on the long elevations seen from the field.
+    road_gallery = z > 64 and x < -2
+    tower_gallery = 27 < x < 37 and 54 < z < 59
+    field_gallery = -15 < x < -11 and -15 < z < 63
+    if road_gallery or tower_gallery or field_gallery:
+        return 'corridor'
+    if z < -34 or (x < -20 and z < -15):
+        return 'terracotta'
+    return 'classroom'
+
+
+def facade_recess(edges, depth):
+    return unary_union([
+        LineString((a, b)).buffer(depth, single_sided=True, join_style='mitre')
+        for a, b in edges
+    ])
+
+
+def gallery_columns(mesh, collision, a, b, y, floor_height, back_depth, arcade=False):
+    length = math.dist(a, b)
+    x_mid, z_mid = position(a, b, 0.5)
+    curved_pier = (-5.8 < x_mid < -4.7 and 69 < z_mid < 71) or (28.6 < x_mid < 29.1 and 57 < z_mid < 59)
+    if length < 2.7 and not curved_pier:
+        return
+    count = max(1, round(length / (4.6 if arcade else 5.5)))
+    width, depth = (0.66, 0.72) if arcade else (0.48, 0.57)
+    inset = 0.47 if arcade else 0.33
+    angle = math.atan2(b[1] - a[1], b[0] - a[0])
+    for bay in range(count):
+        t = 0.5 if curved_pier else (bay + 0.16) / count
+        x, z = position(a, b, t, inset)
+        height = floor_height - 0.27
+        mesh.box('terra' if arcade else 'beige', x, y, z, width, height, depth, angle)
+        collision.box('collider', x, y, z, width, height, depth, angle)
+        # Short cross-beams reveal the depth of the covered walk behind the pier.
+        mesh.strip('soffit', (x, z), position(a, b, t, back_depth), 0.39, y + height - 0.20, 0.20)
+
+
+def ground_arcade(mesh, collision, a, b, floor_height):
+    beam_a, beam_b = position(a, b, 0, 0.32), position(a, b, 1, 0.32)
+    mesh.strip('beige', beam_a, beam_b, 0.63, floor_height - 0.50, 0.25)
+    gallery_columns(mesh, collision, a, b, 0, floor_height, 3.24, arcade=True)
 
 
 def foliage(mesh, x, z, height, seed, y=0):
@@ -369,16 +440,32 @@ def building(mesh, collision, footprint, ident, floors, floor_height):
     core = poly.buffer(-1.30, join_style='mitre')
     total = floors * floor_height
     main_building = ident == 19808442
+    facades = []
+    for ring_no, ring in enumerate([poly.exterior, *poly.interiors]):
+        points = list(ring.coords)
+        for a, b in zip(points, points[1:]):
+            mode = facade_type(ident, ring_no > 0, a, b)
+            arcade = main_building and not ring_no and (mode == 'corridor' or entrance_wing(a, b))
+            facades.append((ring_no, a, b, mode, arcade))
+
+    gallery_depth = 3.02 if main_building else 2.43
+    gallery_recess = facade_recess([(a, b) for _, a, b, mode, _ in facades if mode == 'corridor'], gallery_depth)
+    upper_core = core.difference(gallery_recess)
+    gallery_floor = poly.intersection(gallery_recess)
     if main_building:
         interior_materials(mesh, tile)
         entry_opening = box(-0.45, 25.2, 22.05, 37.8)
         wing_top = floor_height * 2
+        arcade_recess = facade_recess([(a, b) for _, a, b, _, arcade in facades if arcade], 3.24)
         core_sections = (
-            (core.difference(entry_opening.union(WING_AREA)), 0, 4.8),
-            (core.difference(WING_AREA), 4.8, wing_top),
-            (core, wing_top, total),
+            (core.difference(entry_opening.union(WING_AREA).union(arcade_recess)), 0, floor_height),
+            (upper_core.difference(entry_opening.union(WING_AREA)), floor_height, 4.8),
+            (upper_core.difference(WING_AREA), 4.8, wing_top),
+            (upper_core, wing_top, total),
         )
         slab(mesh, poly.intersection(WING_AREA), 0.012, 0.012, 'teaching-floor')
+    elif not gallery_recess.is_empty:
+        core_sections = ((core, 0, floor_height), (upper_core, floor_height, total))
     else:
         core_sections = ((core, 0, total),)
     for section, low, high in core_sections:
@@ -386,6 +473,7 @@ def building(mesh, collision, footprint, ident, floors, floor_height):
         slab(collision, section, low, high, 'collider')
     for floor in range(1, floors):
         y = floor * floor_height
+        slab(collision, gallery_floor, y - 0.28, y, 'collider')
         if main_building and floor <= 2:
             indoor_floor = poly.intersection(WING_AREA)
             if floor == 1:
@@ -406,55 +494,45 @@ def building(mesh, collision, footprint, ident, floors, floor_height):
     else:
         roof_terraces(mesh, poly, ident, total)
 
-    for ring_no, ring in enumerate([poly.exterior, *poly.interiors]):
-        points = list(ring.coords)
-        for k, (a, b) in enumerate(zip(points, points[1:])):
-            length = math.dist(a, b)
-            middle_x, middle_z = position(a, b, 0.5)
-            line_rect(mesh, 'beige', a, b, total - 0.08, 0.89)
-            line_rect(mesh, 'cream', a, b, total + 0.72, 0.12, -0.014)
-            if ident == 1448555206 and (middle_z > 65.5 or middle_x > 88.2):
-                line_rect(mesh, 'beige', a, b, 0, floor_height, 0.12)
-                for floor in range(1, floors):
-                    ribbon_windows(mesh, a, b, floor * floor_height, k, floor_height)
-                continue
-            if length < 1.35:
-                for floor in range(1, floors):
-                    y = floor * floor_height
-                    line_rect(mesh, 'beige', a, b, y - 0.25, 0.63)
-                    line_rect(mesh, 'blue-rail', a, b, y + 0.38, 0.62, 0.018)
-                continue
-            mode = 'corridor'
-            if ident == 1448555203 or (main_building and middle_z < -34):
-                mode = 'terracotta'
-            elif ident == 1448555207 or (main_building and (ring_no or (abs(a[0]-b[0]) < 2.5 and 33 < middle_z < 61))):
-                mode = 'fins'
-            over_entry = main_building and -2.6 < middle_x < 25.6 and 25.1 < middle_z < 36.8 and length > 18
-            opens_to_wing = main_building and ring_no and courtyard_edge(a, b)
-            if opens_to_wing:
-                add_teaching_wing(mesh, collision, (a, b), floor_height)
-            spans = facade_spans(a, b) if opens_to_wing else [(a, b, False)]
-            for start, stop, indoor in spans:
-                span = math.dist(start, stop)
-                count = max(1, round(span / (1.25 if mode == 'fins' else 3.45)))
-                for floor in range(2 if indoor else 0, floors):
-                    y = floor * floor_height
-                    if not over_entry or floor > 0:
-                        if span > 2.2:
-                            panels(mesh, start, stop, y, count, 1.30 if mode == 'corridor' else 0.12,
-                                   mode, ident + k * 117 + floor, floor_height)
-                        else:
-                            line_rect(mesh, 'beige', start, stop, y, floor_height - 0.05, 0.12)
-                    if mode != 'corridor':
-                        continue
-                    if floor > 0:
-                        corridor_rail(mesh, start, stop, y)
-                    if span > 2.8 and (not over_entry or floor > 0):
-                        for bay in range(count):
-                            cx, cz = position(start, stop, (bay + 0.20) / count, 0.42)
-                            mat = 'terra' if main_building and floor == 0 else 'beige'
-                            width, depth = (0.47, 0.58) if floor == 0 else (0.36, 0.42)
-                            mesh.box(mat, cx, y, cz, width, floor_height - 0.21, depth)
+    for k, (ring_no, a, b, mode, arcade) in enumerate(facades):
+        length = math.dist(a, b)
+        middle_x, middle_z = position(a, b, 0.5)
+        fascia = 1.36 if mode == 'corridor' and main_building else 0.89
+        line_rect(mesh, 'beige', a, b, total + 0.81 - fascia, fascia)
+        line_rect(mesh, 'cream', a, b, total + 0.72, 0.12, -0.014)
+        if mode == 'ribbon':
+            line_rect(mesh, 'beige', a, b, 0, floor_height, 0.12)
+            for floor in range(1, floors):
+                ribbon_windows(mesh, a, b, floor * floor_height, floor_height)
+            continue
+
+        over_entry = main_building and -2.6 < middle_x < 25.6 and 25.1 < middle_z < 36.8 and length > 18
+        opens_to_wing = main_building and ring_no and courtyard_edge(a, b)
+        if opens_to_wing:
+            add_teaching_wing(mesh, collision, (a, b), floor_height)
+        spans = facade_spans(a, b) if opens_to_wing else [(a, b, False)]
+        for start, stop, indoor in spans:
+            span = math.dist(start, stop)
+            for floor in range(2 if indoor else 0, floors):
+                if floor == 0 and arcade:
+                    ground_arcade(mesh, collision, start, stop, floor_height)
+                    continue
+                if floor == 0 and over_entry:
+                    continue
+                y = floor * floor_height
+                visible_mode = 'classroom' if floor == 0 and mode in ('fins', 'corridor') else mode
+                inset = gallery_depth if visible_mode == 'corridor' else 0.12
+                if span > 2.2:
+                    bay_width = {'fins': 1.32, 'corridor': 4.1, 'classroom': 4.5, 'terracotta': 3.85}[visible_mode]
+                    count = max(1, round(span / bay_width))
+                    panels(mesh, start, stop, y, count, inset, visible_mode, ident + k * 117 + floor, floor_height)
+                elif visible_mode == 'corridor':
+                    line_rect(mesh, 'beige', start, stop, y, floor_height - 0.04, inset - 0.20)
+                else:
+                    line_rect(mesh, 'beige', start, stop, y, floor_height - 0.04, 0.12)
+                if visible_mode == 'corridor':
+                    corridor_rail(mesh, collision, start, stop, y)
+                    gallery_columns(mesh, collision, start, stop, y, floor_height, gallery_depth)
 
 
 def clock_tower(mesh, collision, x, z):
