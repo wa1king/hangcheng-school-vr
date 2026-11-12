@@ -1,6 +1,8 @@
 export type Mode = 'overview' | 'walk' | 'fly';
 
-const movementKeys = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'ShiftLeft', 'ShiftRight', 'Space', 'KeyE', 'KeyQ', 'ControlLeft', 'ControlRight']);
+const movementKeys = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ShiftLeft', 'ShiftRight', 'Space', 'KeyE', 'KeyQ', 'ControlLeft', 'ControlRight']);
+
+type PointerPosition = { x: number; y: number };
 
 export function createInput(options: {
   surface: HTMLElement;
@@ -10,14 +12,17 @@ export function createInput(options: {
   mode: () => Mode;
   setMode: (mode: Mode) => void;
   reset: () => void;
-  look: (x: number, y: number) => void;
+  turn: (step: -1 | 1) => void;
+  zoom: (scale: number) => void;
   onDeviceChange: () => void;
 }) {
   const { surface, movePad, thumb, lifts } = options;
   const keys = new Set<string>();
   const touchQuery = matchMedia('(pointer: coarse)');
   let touch = touchQuery.matches;
-  let drag: { id: number; x: number; y: number } | null = null;
+  const touches = new Map<number, PointerPosition>();
+  let drag: (PointerPosition & { id: number }) | null = null;
+  let pinchDistance = 0;
   let joystick: number | null = null;
   let stickX = 0;
   let stickY = 0;
@@ -33,8 +38,16 @@ export function createInput(options: {
   function releaseAll() {
     keys.clear();
     drag = null;
+    touches.clear();
+    pinchDistance = 0;
     lift = 0;
     releaseJoystick();
+  }
+
+  function distanceBetweenTouches() {
+    if (touches.size !== 2) return 0;
+    const [first, second] = touches.values();
+    return Math.max(8, Math.hypot(first.x - second.x, first.y - second.y));
   }
 
   function setTouch(value: boolean) {
@@ -61,37 +74,53 @@ export function createInput(options: {
     else if (event.pointerType === 'mouse' && !touchQuery.matches) setTouch(false);
   });
   surface.addEventListener('pointerdown', event => {
-    if (options.mode() === 'overview' || event.button !== 0 || document.pointerLockElement === surface) return;
-    if (drag) return;
-    drag = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    if (event.button !== 0) return;
+    const position = { x: event.clientX, y: event.clientY };
+    if (event.pointerType === 'touch') {
+      if (touches.size === 0) drag = { id: event.pointerId, ...position };
+      else drag = null;
+      touches.set(event.pointerId, position);
+      pinchDistance = distanceBetweenTouches();
+    } else {
+      if (drag || touches.size > 0) return;
+      drag = { id: event.pointerId, ...position };
+    }
     surface.setPointerCapture(event.pointerId);
   });
   surface.addEventListener('pointermove', event => {
-    if (event.pointerId !== drag?.id) return;
-    options.look(event.clientX - drag.x, event.clientY - drag.y);
-    drag.x = event.clientX;
-    drag.y = event.clientY;
+    const position = touches.get(event.pointerId);
+    if (!position) return;
+    position.x = event.clientX;
+    position.y = event.clientY;
+    const nextDistance = distanceBetweenTouches();
+    if (nextDistance && pinchDistance && options.mode() !== 'overview') {
+      options.zoom(nextDistance / pinchDistance);
+    }
+    pinchDistance = nextDistance;
   });
   for (const end of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) {
     surface.addEventListener(end, event => {
-      if (event.pointerId === drag?.id) drag = null;
+      if (touches.delete(event.pointerId)) pinchDistance = distanceBetweenTouches();
+      if (event.pointerId !== drag?.id) return;
+      const dx = event.clientX - drag.x;
+      const dy = event.clientY - drag.y;
+      drag = null;
+      if (end === 'pointerup' && Math.abs(dx) >= 36 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+        options.turn(dx < 0 ? -1 : 1);
+      }
     });
     movePad.addEventListener(end, event => {
       if (event.pointerId === joystick) releaseJoystick();
     });
   }
-  surface.addEventListener('dblclick', () => {
-    if (options.mode() === 'overview' || touch || !surface.requestPointerLock) return;
-    try {
-      const result = surface.requestPointerLock();
-      result?.catch(() => {});
-    } catch {
-      // Drag-look remains available when the browser declines pointer lock.
-    }
-  });
-  document.addEventListener('mousemove', event => {
-    if (document.pointerLockElement === surface) options.look(event.movementX, event.movementY);
-  });
+  surface.addEventListener('wheel', event => {
+    if (options.mode() === 'overview' || !event.deltaY) return;
+    event.preventDefault();
+    const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16
+      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? surface.clientHeight : 1;
+    const distance = Math.max(-160, Math.min(160, event.deltaY * unit));
+    options.zoom(Math.exp(-distance * .002));
+  }, { passive: false });
   movePad.addEventListener('pointerdown', event => {
     if (joystick !== null) return;
     joystick = event.pointerId;
@@ -124,6 +153,11 @@ export function createInput(options: {
     if (event.ctrlKey || event.metaKey || event.altKey) {
       if (event.code !== 'ControlLeft' && event.code !== 'ControlRight') return;
     }
+    if (event.code === 'ArrowLeft' || event.code === 'ArrowRight') {
+      event.preventDefault();
+      if (!event.repeat) options.turn(event.code === 'ArrowLeft' ? -1 : 1);
+      return;
+    }
     if (movementKeys.has(event.code) && options.mode() !== 'overview') {
       event.preventDefault();
       keys.add(event.code);
@@ -143,7 +177,7 @@ export function createInput(options: {
   const down = (...codes: string[]) => codes.some(code => keys.has(code));
   return {
     get touch() { return touch; },
-    get side() { return Number(down('KeyD', 'ArrowRight')) - Number(down('KeyA', 'ArrowLeft')) + stickX; },
+    get side() { return Number(down('KeyD')) - Number(down('KeyA')) + stickX; },
     get ahead() { return Number(down('KeyW', 'ArrowUp')) - Number(down('KeyS', 'ArrowDown')) + stickY; },
     get lift() { return Number(down('Space', 'KeyE')) - Number(down('ControlLeft', 'ControlRight', 'KeyQ')) + lift; },
     get running() { return down('ShiftLeft', 'ShiftRight'); },

@@ -25,12 +25,13 @@
           <button id="about" class="utility" type="button" aria-expanded="false" aria-controls="about-panel">资料</button>
         </div>
       </header>
-      <div class="tour-controls">
-        <div id="avatar-controls" class="avatar-controls" role="group" aria-label="选择游览角色" hidden>
-          <button type="button" data-avatar="taoqi" aria-pressed="true"><span class="avatar-swatch" aria-hidden="true"></span>淘气</button>
-          <button type="button" data-avatar="xiaoxiao" aria-pressed="false"><span class="avatar-swatch" aria-hidden="true"></span>笑笑</button>
-        </div>
-        <button id="view-toggle" class="utility view-toggle" type="button" aria-label="第一人称视角" aria-pressed="false" hidden><span class="view-label">跟随视角</span></button>
+      <div id="direction-controls" class="direction-controls" role="group" aria-label="视角方向" hidden>
+        <button type="button" data-turn="left" title="向左转 90°">左转</button>
+        <button type="button" data-heading="north" aria-label="面向北" aria-pressed="true">北</button>
+        <button type="button" data-heading="east" aria-label="面向东" aria-pressed="false">东</button>
+        <button type="button" data-heading="south" aria-label="面向南" aria-pressed="false">南</button>
+        <button type="button" data-heading="west" aria-label="面向西" aria-pressed="false">西</button>
+        <button type="button" data-turn="right" title="向右转 90°">右转</button>
       </div>
       <aside id="about-panel" class="about-panel" hidden aria-label="场景资料">
         <h2>场景资料</h2>

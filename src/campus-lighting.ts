@@ -4,7 +4,6 @@ import type { loadCampus } from './campus.ts';
 import type { Mode } from './input.ts';
 
 type Campus = Awaited<ReturnType<typeof loadCampus>>;
-type Surface = { y: number; normal: { x: number; y: number; z: number } };
 
 const sunDirection = new THREE.Vector3(-0.69, 0.55, 0.47).normalize();
 const haze = new THREE.Color('#bed0d9');
@@ -423,37 +422,6 @@ function collectFixtures(mesh: THREE.Mesh, centers: THREE.Vector3[]) {
   }
 }
 
-function createContactShadow() {
-  const side = 32;
-  const alpha = new Uint8Array(side * side * 4);
-  for (let y = 0; y < side; y += 1) {
-    for (let x = 0; x < side; x += 1) {
-      const distance = Math.hypot((x + 0.5) / side - 0.5, (y + 0.5) / side - 0.5) * 2;
-      const value = Math.round(255 * (1 - THREE.MathUtils.smoothstep(distance, 0.02, 0.97)) ** 1.55);
-      const index = (y * side + x) * 4;
-      alpha.set([value, value, value, 255], index);
-    }
-  }
-  const texture = new THREE.DataTexture(alpha, side, side);
-  texture.minFilter = THREE.LinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.needsUpdate = true;
-  const material = new THREE.MeshBasicMaterial({
-    color: '#29242a',
-    alphaMap: texture,
-    transparent: true,
-    depthWrite: false,
-    polygonOffset: true,
-    polygonOffsetFactor: -1,
-  });
-  const plane = new THREE.PlaneGeometry(1, 1);
-  plane.rotateX(-Math.PI / 2);
-  const shadow = new THREE.Mesh(plane, material);
-  shadow.renderOrder = 1;
-  shadow.visible = false;
-  return shadow;
-}
-
 export function createCampusLighting(
   scene: THREE.Scene, camera: THREE.PerspectiveCamera, renderer: THREE.WebGLRenderer, campus: Campus, mobile: boolean,
 ) {
@@ -478,11 +446,10 @@ export function createCampusLighting(
   sun.shadow.mapSize.set(mapSize, mapSize);
   sun.shadow.intensity = 0.94;
   sun.shadow.radius = 2;
-  const blob = createContactShadow();
   const reflection = createSkyReflection();
   const fixtures: THREE.Vector3[] = [];
   const roomLights = [new THREE.PointLight('#fff0d8', 0, 5.2, 2), new THREE.PointLight('#fff0d8', 0, 5.2, 2)];
-  scene.add(sky, backdrop, skyLight, reflectedLight, sun, sun.target, blob, ...roomLights);
+  scene.add(sky, backdrop, skyLight, reflectedLight, sun, sun.target, ...roomLights);
   const query = new URLSearchParams(window.location.search);
   const localReflections = !mobile && !(query.has('debug') && query.get('probe') === '0')
     ? createLocalReflections(renderer, campus, scene, sky, backdrop, skyLight, reflectedLight, sun)
@@ -522,9 +489,6 @@ export function createCampusLighting(
   });
 
   const focus = new THREE.Vector3();
-  const up = new THREE.Vector3(0, 1, 0);
-  const normal = new THREE.Vector3();
-  const contactLift = campus.manifest.collisionFromModels ? 0.019 : 0.043;
   let currentRadius = 0;
 
   function updateFixtures(feet?: THREE.Vector3) {
@@ -555,7 +519,7 @@ export function createCampusLighting(
     }
   }
 
-  function update(mode: Mode, feet?: THREE.Vector3, surface?: Surface, firstFramePresented = true) {
+  function update(mode: Mode, feet?: THREE.Vector3, firstFramePresented = true) {
     camera.getWorldPosition(sky.position);
     localReflections?.update(firstFramePresented && mode !== 'overview');
     updateFixtures(mode === 'walk' ? feet : undefined);
@@ -580,27 +544,16 @@ export function createCampusLighting(
       }
       renderer.shadowMap.needsUpdate = true;
     }
-    blob.visible = Boolean(feet && surface);
-    if (feet && surface) {
-      const height = Math.max(0, feet.y - surface.y);
-      normal.set(surface.normal.x, surface.normal.y, surface.normal.z);
-      blob.position.set(feet.x, surface.y, feet.z).addScaledVector(normal, contactLift);
-      blob.quaternion.setFromUnitVectors(up, normal);
-      const spread = 1 + 0.62 * height;
-      blob.scale.set(0.83 * spread, 1, 0.79 * spread);
-      blob.material.opacity = 0.42 * (1 - THREE.MathUtils.smoothstep(height, 0.03, 1.38));
-    }
   }
 
   return {
     update,
     dispose() {
-      for (const mesh of [sky, backdrop, blob]) {
+      for (const mesh of [sky, backdrop]) {
         mesh.removeFromParent();
         mesh.geometry.dispose();
         mesh.material.dispose();
       }
-      blob.material.alphaMap?.dispose();
       localReflections?.dispose();
       reflection.dispose();
       sun.shadow.dispose();
