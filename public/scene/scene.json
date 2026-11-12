@@ -4,7 +4,7 @@
   "description": "航空路 10 号本部。校舍外观参照开放地图和影像，楼内布局为游览示意。可进入教学楼，沿走廊和楼梯走到屋顶。",
   "models": [
     {
-      "url": "./campus.glb?v=040bdb86692d"
+      "url": "./campus.glb?v=7139f9640cde"
     },
     {
       "url": "./surroundings.glb?v=27a8965aaf4a",

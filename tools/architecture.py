@@ -673,6 +673,8 @@ def clock_tower(mesh, x, z):
 
 
 def entrance(mesh):
+    from entry_details import draw_entry_piers, draw_entry_steps, draw_entry_window
+
     # Placement is inferred from the 2018 gate photograph and 2023 design image.
     clock_tower(mesh, 31.2, 57.9)
 
@@ -680,9 +682,10 @@ def entrance(mesh):
     facade_x, facade_z = 10.8, 37.0
     front = facade_z + 0.30
     outer_left, outer_right = facade_x - 10.65, facade_x + 10.65
-    mesh.box('beige', facade_x, 4.80, facade_z - 0.20, 21.3, 13.80, 0.20)
+    mesh.box('beige', facade_x, 4.80, facade_z - 0.62, 21.3, 13.80, 0.20)
     for x in (outer_left + 0.07, outer_right - 0.07):
-        mesh.box('beige', x, 4.80, facade_z, 0.14, 13.80, 0.60)
+        mesh.box('beige', x, 4.80, facade_z - 0.16, 0.14, 13.80, 0.92)
+    mesh.box('cream', facade_x, 18.60, facade_z - 0.20, 21.41, 0.08, 1.12)
     for y, height in ((4.8, 0.66), (14.89, 3.71)):
         line_rect(mesh, 'beige', (outer_right, front), (outer_left, front), y, height)
     next_wall = outer_left
@@ -690,27 +693,24 @@ def entrance(mesh):
         left = 1.35 + i * 1.40
         right = left + 0.66
         line_rect(mesh, 'beige', (left, front), (next_wall, front), 5.46, 9.43)
-        window_opening(mesh, (right, front), (left, front), 5.46, 14.89, 0.31,
-                       'glass-light' if i % 4 == 1 else 'glass-deep', 1, solid_frame=True)
-        for y in (7.20, 9.53):
-            mesh.strip('frame', (left, front - 0.29), (right, front - 0.29), 0.041, y, 0.034)
+        draw_entry_window(mesh, left, right, front, i)
         next_wall = right
     line_rect(mesh, 'beige', (outer_right, front), (next_wall, front), 5.46, 9.43)
     mesh.box('beige', facade_x, 17.35, facade_z + 0.24, 9.0, 2.15, 0.62)
     line_rect(mesh, 'school-name', (15.15, 37.56), (6.45, 37.56), 17.37, 2.02, uv=OUTWARD_UV)
-    for cx in (1.1, 6.2, 15.35, 20.5):
-        mesh.box('cream', cx, 0, 37.8, 0.77, 4.84, 0.78)
-    for step in range(8):
-        start_z = 53.6 - step * 0.42
-        finish_z = start_z - 0.42 if step < 7 else 40.3
-        top = (step + 1) * 0.145
-        mesh.box('plaza', 10.75, 0, (start_z + finish_z) / 2, 17.1, top, start_z - finish_z)
-        mesh.strip('reveal', (2.24, start_z - 0.042), (19.26, start_z - 0.042), 0.044, top + 0.002)
+    draw_entry_piers(mesh, facade_x, front, (1.1, 6.2, 15.35, 20.5))
+    draw_entry_steps(mesh)
 
     for x in (2.38, 19.12):
         start_z, stop_z = 53.45, 50.45
         branch(mesh, (x, 1.02, start_z), (x, 2.09, stop_z), .024, .024, 'stainless')
         branch(mesh, (x, 2.09, stop_z), (x, 2.09, 49.71), .024, .024, 'stainless')
+        branch(mesh, (x, .23, start_z), (x, 1.30, stop_z), .017, .017, 'stainless')
+        branch(mesh, (x, 1.30, stop_z), (x, 1.30, 49.71), .017, .017, 'stainless')
+        for index in range(1, 23):
+            z = start_z - index * .16
+            top = min(2.09, 1.02 + (start_z - z) * (2.09 - 1.02) / (start_z - stop_z))
+            mesh.box('stainless', x, top - .79, z, .017, .79, .017)
         for z in (start_z, 52.5, 51.5, stop_z, 49.71):
             step = min(8, int((53.6-z)/.42) + 1)
             ground = step*.145

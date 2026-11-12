@@ -17,7 +17,10 @@ from shapely.geometry.polygon import orient
 
 from access import building_access
 from architecture import building, entrance, foliage, materials, slab
+from entry_details import add_entry_details, entry_drain_opening
+from entry_greenery import detailed_tree, register_greenery
 from interiors import PORTAL_Z
+from material_scans import apply_surface_materials
 from mesh import Mesh, rect, rounded
 from sports import add_sports
 from surroundings import add_surroundings
@@ -62,7 +65,7 @@ def read_data():
 def landscape(visual, polygons, lines):
     campus = Polygon(polygons[1084438083][0])
     visual.surface('ground', rect(-15, -10, 455, 390), -0.27)
-    slab(visual, campus, -0.03, -0.03, 'plaza')
+    slab(visual, campus.difference(entry_drain_opening()), -0.03, -0.03, 'plaza')
     slab(visual, box(.8, -14.4, 22.0, 24.4).intersection(campus), -.021, -.021, 'courtyard-paving')
     for x, z in ((10.6, -1.62), (10.6, 8.70)):
         garden_bench(visual, x, z)
@@ -102,7 +105,15 @@ def landscape(visual, polygons, lines):
         visual.prism('curb', rounded(x, z, w, d, min(w, d) * 0.26), -0.02, 0.21, 'planter')
         for u in range(max(1, round(w / 7))):
             position = x + w * ((u + 0.5) / max(1, round(w / 7)) - 0.5)
-            foliage(visual, position, z + rng.uniform(-0.9, 0.9), rng.uniform(3.5, 6.1), 100 * i + u, 0.21)
+            tree_z = z + rng.uniform(-0.9, 0.9)
+            height = rng.uniform(3.5, 6.1)
+            tree = detailed_tree if i in (3, 4, 5, 6) else foliage
+            tree(visual, position, tree_z, height, 100 * i + u, 0.21)
+
+    # Evergreen shrubs in the photographs flank the steps, outside the clear opening.
+    for x, z, seed in ((.55, 51.68, 661), (20.94, 51.44, 662)):
+        visual.prism('curb', rounded(x, z, 1.72, 2.21, .18), -.03, .24, 'planter')
+        detailed_tree(visual, x, z, 2.85, seed, .24, .25)
 
     for i, x in enumerate((-127, -106, -90, -75, -61, -49, -34, -22, 34, 46, 60, 72, 84, 95)):
         foliage(visual, x, 83.4 + rng.uniform(-0.6, 0.6), rng.uniform(4.3, 7.0), 421 + i)
@@ -193,12 +204,15 @@ def main(target=BASE / 'public' / 'scene'):
     polygons, lines = read_data()
     visual = Mesh(site_to_world)
     materials(visual)
+    register_greenery(visual)
     landscape(visual, polygons, lines)
     for ident, floors, height in ((19808442, 4, TEACHING_FLOOR_HEIGHT), (1448555207, 1, 4.6),
                                    (1448555203, 5, 3.61), (1448555206, 8, 3.46)):
         building(visual, polygons[ident], ident, floors, height)
     entrance(visual)
+    add_entry_details(visual)
     add_sports(visual, polygons)
+    apply_surface_materials(visual)
     target.mkdir(parents=True, exist_ok=True)
     count = visual.export(target / 'campus.glb')
     context = Mesh(site_to_world)

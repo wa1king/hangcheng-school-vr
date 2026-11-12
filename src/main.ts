@@ -487,7 +487,8 @@ async function initialize() {
     resetFeet(campus.manifest.spawn);
     finished = true;
     notice.hidden = true;
-    updateHud();
+    if (player) setMode('walk');
+    else updateHud();
     void initializeVR();
   } catch (error) {
     console.error(error);

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { applyCampusWeathering } from './campus-surfaces.ts';
 import type { loadCampus } from './campus.ts';
 import type { Mode } from './input.ts';
 
@@ -216,8 +217,8 @@ export function createCampusLighting(
   );
   backdrop.rotation.x = -Math.PI / 2;
   backdrop.position.set(campus.center.x, campus.bounds.min.y - 0.36, campus.center.z);
-  const skyLight = new THREE.HemisphereLight('#dceaff', '#b7a889', 0.98);
-  const reflectedLight = new THREE.AmbientLight('#eae6dc', 0.13);
+  const skyLight = new THREE.HemisphereLight('#dceaff', '#c7beaa', 1.14);
+  const reflectedLight = new THREE.AmbientLight('#eae6dc', 0.11);
   const sun = new THREE.DirectionalLight('#fff2dc', 3.43);
   const sunOffset = sunDirection.clone().multiplyScalar(span * 1.30);
   sun.castShadow = true;
@@ -241,6 +242,7 @@ export function createCampusLighting(
     for (const material of materials) {
       if (!(material instanceof THREE.MeshStandardMaterial) || updated.has(material)) continue;
       updated.add(material);
+      applyCampusWeathering(material);
       if (material.name === 'teaching-lamp') {
         material.emissive.set('#fff1db');
         material.emissiveIntensity = 1.05;
@@ -249,10 +251,13 @@ export function createCampusLighting(
         material.envMapIntensity = material.name === 'glass-clear' ? 1.42 : 1.02;
         material.roughness = Math.min(material.roughness, 0.25);
         if (material.name !== 'glass-clear') material.metalness = Math.max(material.metalness, 0.11);
-      } else if (['teaching-metal', 'frame', 'blue-rail', 'blue-cap', 'stand_steel'].includes(material.name)) {
+      } else if (['teaching-metal', 'frame', 'blue-rail', 'blue-cap', 'stand_steel', 'entry-aluminum', 'stainless'].includes(material.name)) {
         material.envMap = reflection;
         material.envMapIntensity = 0.48;
         material.metalness = Math.max(material.metalness, 0.27);
+      } else if (material.name === 'teaching-floor') {
+        material.envMap = reflection;
+        material.envMapIntensity = 0.22;
       }
     }
   });

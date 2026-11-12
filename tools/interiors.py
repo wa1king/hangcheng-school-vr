@@ -8,6 +8,9 @@ from PIL import Image, ImageDraw, ImageFont
 from shapely.geometry import box
 
 from connectors import CROSSOVER_DOOR, overhead_light
+from gallery_details import (fit_doorway, gallery_drain_stack, gallery_materials, gallery_pier_base,
+                             gallery_rail_mount, gallery_reading_alcove, gallery_service_fittings,
+                             trim_intervals)
 from mesh import signed_area, triangulate
 from surface_textures import birch_laminate, chalkboard, notice_board, porcelain_tiles, terrazzo, weathered_plaster
 
@@ -57,6 +60,7 @@ def sign_texture(title, accent):
 
 
 def interior_materials(mesh, floors):
+    gallery_materials(mesh)
     for name, (color, normal, roughness) in (
         ('teaching-floor', porcelain_tiles((180, 186, 180), (133, 140, 132), 621)),
         ('stair-stone', terrazzo((150, 156, 151), 622)),
@@ -85,12 +89,13 @@ def interior_materials(mesh, floors):
     mesh.material('stair-nosing', (68, 84, 80), 0.58, solid=False)
     mesh.material('teaching-threshold', (154, 160, 155), 0.86, solid=False)
     for name, title, accent in (
-        ('teaching-sign-entry', '教学楼室内示意', '#ba9e6d'),
-        ('teaching-sign-room-a', '示意教室 A', '#afbe95'),
-        ('teaching-sign-room-b', '示意教室 B', '#b7aa8d'),
+        ('teaching-sign-entry', '教学楼', '#ba9e6d'),
+        ('teaching-sign-room-a', '教室 01', '#afbe95'),
+        ('teaching-sign-room-b', '教室 02', '#b7aa8d'),
         ('teaching-sign-stair', '楼梯', '#9fbbc2'),
-        ('teaching-sign-roof', '楼顶 · 示意', '#9fbbc2'),
-        *((f'teaching-sign-level-{level}', f'{level} 层 · 示意', '#9fbbc2')
+        ('teaching-sign-roof', '屋顶平台', '#9fbbc2'),
+        ('teaching-sign-extinguisher', '灭火器', '#c48871'),
+        *((f'teaching-sign-level-{level}', f'{level} 层', '#9fbbc2')
           for level in range(1, floors + 1)),
     ):
         mesh.material(name, (255, 255, 255), 0.88, texture=sign_texture(title, accent), solid=False)
@@ -192,8 +197,15 @@ def courtyard_wall(mesh, edge, y, top, level):
     wall_along_z(mesh, x_at, WING_NORTH, WING_SOUTH, y + beam_bottom, top, 0.30, 'beige')
     for z in sections:
         z = min(WING_SOUTH - 0.17, max(WING_NORTH + 0.17, z))
-        mesh.box('terra' if ground else 'cream', x_at(z) + 0.025, y, z,
-                 0.48 if ground else 0.42, beam_bottom, 0.34)
+        x = x_at(z) + .025
+        base = .184 if ground else .096
+        gallery_pier_base(mesh, x, z, y, ground)
+        mesh.box('terra' if ground else 'cream', x, y + base, z,
+                 0.48 if ground else 0.42, beam_bottom - base, 0.34)
+
+    # The covered gallery drains at a pier, clear of the open entry and walking line.
+    drain_z = sections[4]
+    gallery_drain_stack(mesh, x_at(drain_z) + .310, drain_z, y, top, ground)
 
     if ground:
         # A low terrace edge between the pillars leaves the covered walk open above it.
@@ -215,7 +227,12 @@ def courtyard_wall(mesh, edge, y, top, level):
         bars = math.ceil((rail_end - rail_start) / 0.17)
         for bar in range(1, bars):
             z = rail_start + (rail_end - rail_start) * bar / bars
-            mesh.box('blue-rail', x_at(z) + 0.055, y + 0.335, z, 0.028, 0.68, 0.027)
+            x = x_at(z) + .055
+            post = bar % 6 == 0
+            width = .038 if post else .028
+            mesh.box('blue-rail', x, y + .335, z, width, .68, width)
+            if post:
+                gallery_rail_mount(mesh, x, z, y + .335)
 
 
 def corridor_partition(mesh, north, south, door_z, y, top, sign, with_window=True):
@@ -245,10 +262,10 @@ def corridor_partition(mesh, north, south, door_z, y, top, sign, with_window=Tru
     for z in (a + 0.026, b - 0.026):
         mesh.box('teaching-metal', CORRIDOR_WALL, y, z, 0.25, 2.42, 0.052)
     mesh.box('teaching-metal', CORRIDOR_WALL, y + 2.38, door_z, 0.25, 0.045, b - a)
+    floor_y = y + (.012 if y == 0 else 0)
+    trim_intervals(mesh, CORRIDOR_WALL, intervals, floor_y, with_window)
+    fit_doorway(mesh, CORRIDOR_WALL, a, b, y, floor_y, with_window)
     if with_window:
-        # An open classroom door rests against the inside return wall.
-        mesh.box('teaching-wood', CORRIDOR_WALL + 0.48, y + 0.055, b - 0.09, 0.94, 2.17, 0.065)
-        mesh.box('teaching-metal', CORRIDOR_WALL + 0.87, y + 0.99, b - 0.135, 0.11, 0.035, 0.060)
         start, end = intervals[0 if window_side > 0 else 1]
         if end - start > 1.36:
             center = (start + end) / 2
@@ -438,6 +455,10 @@ def add_teaching_wing(mesh, edge, floor_height, floors, classroom_edge):
         corridor_partition(mesh, 2.48, WING_SOUTH, 3.36, y, top, 'teaching-sign-stair', with_window=False)
         for z in (-11.9, -8.1, -4.3, -0.5, 3.3, 7.1, 10.9, 14.7):
             overhead_light(mesh, 25.48, z, top, across=True)
+        gallery_service_fittings(mesh, CORRIDOR_WALL, y, top)
+        if level in (1, 2):
+            gallery_reading_alcove(mesh, 25.45, WING_NORTH + .132, y, level)
+        label(mesh, 'teaching-sign-extinguisher', CORRIDOR_WALL - .350, 7.61, y + .652, .36, .079)
         label(mesh, f'teaching-sign-level-{level + 1}', CORRIDOR_WALL - 0.085, 6.15, y + 1.72, 1.0, 0.26)
         stairs(mesh, y, floor_height, roof=(level == floors - 1))
     rooftop_stairhouse(mesh, floor_height * floors + 0.05)

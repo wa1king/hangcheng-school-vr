@@ -2,7 +2,7 @@
 
 深圳市宝安区航城学校航空路 10 号本部的三维漫游。外观依据公开资料重建，楼高、场地高差和构件尺寸仍待实测。
 
-选择淘气或笑笑，用跟随视角步行。切到飞行后，角色戴上竹蜻蜓，键盘按 E 上升、Q 下降，触屏使用右侧升降按钮。游览中可以切换第一人称或跳转到指定地点。两位角色使用为本项目制作的卡通模型。
+从校门广场开始步行，选择淘气或笑笑。切到飞行后，角色戴上竹蜻蜓，键盘按 E 上升、Q 下降，触屏使用右侧升降按钮。游览中可以切换第一人称或跳转到指定地点。两位角色使用为本项目制作的卡通模型。
 
 从「前往」选择主教学翼、西侧活动楼、北侧教学楼或东南综合楼的入口，可以步行进楼、穿过走廊并沿楼梯到屋顶。楼内平面与主楼连廊是游览示意，教室陈设参考公开课堂照片。
 
@@ -16,6 +16,6 @@
 
 ## 数据与署名
 
-[校园平面源数据](evidence/campus-osm.geojson)来自 © OpenStreetMap contributors，遵循 [ODbL 1.0](https://www.openstreetmap.org/copyright)。卫星影像和历史实拍用于核对外观，发布场景采用自行绘制的材质。
+[校园平面源数据](evidence/campus-osm.geojson)来自 © OpenStreetMap contributors，遵循 [ODbL 1.0](https://www.openstreetmap.org/copyright)。卫星影像和历史实拍用于核对外观。`tools/material_scans` 内的贴图经裁色和缩放，原始材质来自 Poly Haven 的 [Granite Tile 04](https://polyhaven.com/a/granite_tile_04)、[Asphalt 02](https://polyhaven.com/a/asphalt_02)、[Terrazzo Tiles](https://polyhaven.com/a/terrazzo_tiles) 和 [White Plaster 02](https://polyhaven.com/a/white_plaster_02)，遵循 [CC0](https://polyhaven.com/license)。
 
 [SimWorld 控制器许可](LICENSE.upstream) · [第三方软件许可](public/THIRD-PARTY-NOTICES.txt)

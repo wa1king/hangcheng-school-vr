@@ -174,7 +174,8 @@ export async function loadCampus() {
     }
     if (!(object instanceof Mesh)) return;
     const materials = Array.isArray(object.material) ? object.material : [object.material];
-    object.castShadow = object.userData.shadow !== false && materials.some(material => !material.transparent);
+    object.castShadow = object.userData.shadow !== false && materials.some(material => !material.transparent
+      && (!material.name.startsWith('decal-') || material.alphaTest > 0));
     object.receiveShadow = object.userData.shadow !== false;
     if (object.userData.surroundings) return;
     if (!object.geometry.boundingBox) object.geometry.computeBoundingBox();
