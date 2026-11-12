@@ -401,9 +401,10 @@ def ground_arcade(mesh, a, b, floor_height):
     gallery_columns(mesh, a, b, 0, floor_height, 3.24, arcade=True)
 
 
-def branch(mesh, a, b, radius_a, radius_b, material='bark', sides=7):
+def branch(mesh, a, b, radius_a, radius_b, material='bark', sides=7, texture_period=None):
     axis = np.array(b) - a
-    axis = axis / np.linalg.norm(axis)
+    length = np.linalg.norm(axis)
+    axis = axis / length
     tangent = np.cross(axis, (0, 0, 1) if abs(axis[2]) < .85 else (1, 0, 0))
     tangent = tangent / np.linalg.norm(tangent)
     bitangent = np.cross(axis, tangent)
@@ -415,7 +416,12 @@ def branch(mesh, a, b, radius_a, radius_b, material='bark', sides=7):
     lower, upper = rings
     for i in range(sides):
         j = (i + 1) % sides
-        mesh.face(material, (lower[i], lower[j], upper[j], upper[i]))
+        uv = None
+        if texture_period is not None:
+            width = math.tau * (radius_a + radius_b) / (2 * sides * texture_period)
+            height = length / texture_period
+            uv = [(i * width, height), ((i + 1) * width, height), ((i + 1) * width, 0), (i * width, 0)]
+        mesh.face(material, (lower[i], lower[j], upper[j], upper[i]), uv=uv)
     mesh.face(material, upper)
     mesh.face(material, lower[::-1])
 

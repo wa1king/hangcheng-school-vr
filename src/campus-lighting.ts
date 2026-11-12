@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { createCampusBakedLight } from './campus-baked-light.ts';
+import { loadCampusPhotoSky } from './campus-photo-sky.ts';
 import { applyCampusWeathering } from './campus-surfaces.ts';
 import type { loadCampus } from './campus.ts';
 import type { Mode } from './input.ts';
@@ -451,7 +453,15 @@ export function createCampusLighting(
   const roomLights = [new THREE.PointLight('#fff0d8', 0, 5.2, 2), new THREE.PointLight('#fff0d8', 0, 5.2, 2)];
   scene.add(sky, backdrop, skyLight, reflectedLight, sun, sun.target, ...roomLights);
   const query = new URLSearchParams(window.location.search);
-  const localReflections = !mobile && !(query.has('debug') && query.get('probe') === '0')
+  const debug = query.has('debug');
+  const photographicExposure = !debug || query.get('camera') !== '0';
+  const baseExposure = renderer.toneMappingExposure;
+  let photoSkySettled = debug && query.get('photoSky') === '0';
+  let photographicAssetsStarted = false;
+  let disposed = false;
+  let photoSkyTexture: THREE.DataTexture | undefined;
+  const bakedLight = createCampusBakedLight(campus.manifestURL, campus.manifest.models[0].url);
+  const localReflections = !mobile && !(debug && query.get('probe') === '0')
     ? createLocalReflections(renderer, campus, scene, sky, backdrop, skyLight, reflectedLight, sun)
     : undefined;
   if (campus.manifest.collisionFromModels) campus.collision.add(backdrop.clone());
@@ -485,11 +495,35 @@ export function createCampusLighting(
         material.envMap = reflection;
         material.envMapIntensity = 0.22;
       }
+      if (!object.userData.surroundings) bakedLight?.register(material);
     }
   });
 
   const focus = new THREE.Vector3();
   let currentRadius = 0;
+
+  function startPhotographicAssets() {
+    photographicAssetsStarted = true;
+    bakedLight?.start();
+    if (photoSkySettled) return;
+    void loadCampusPhotoSky().then(({ material, texture }) => {
+      if (disposed) {
+        material.dispose();
+        texture.dispose();
+        return;
+      }
+      sky.material.dispose();
+      sky.material = material;
+      photoSkyTexture = texture;
+      for (const surface of updated) {
+        if (surface instanceof THREE.MeshStandardMaterial && surface.envMap === reflection) {
+          surface.envMap = texture;
+        }
+      }
+    }).catch(() => {
+      // The procedural sky remains visible if the panorama is unavailable.
+    }).finally(() => { photoSkySettled = true; });
+  }
 
   function updateFixtures(feet?: THREE.Vector3) {
     let nearest: THREE.Vector3 | undefined;
@@ -519,9 +553,15 @@ export function createCampusLighting(
     }
   }
 
-  function update(mode: Mode, feet?: THREE.Vector3, firstFramePresented = true) {
+  function update(mode: Mode, feet: THREE.Vector3 | undefined, firstFramePresented: boolean, dt: number) {
     camera.getWorldPosition(sky.position);
-    localReflections?.update(firstFramePresented && mode !== 'overview');
+    if (firstFramePresented && !photographicAssetsStarted) startPhotographicAssets();
+    localReflections?.update(firstFramePresented && photoSkySettled && mode !== 'overview');
+    if (photographicExposure) {
+      const openSky = mode === 'walk' ? bakedLight?.skyVisibilityAt(sky.position) ?? 1 : 1;
+      const exposure = baseExposure + 0.24 * (1 - THREE.MathUtils.smoothstep(openSky, .04, .65));
+      renderer.toneMappingExposure = THREE.MathUtils.damp(renderer.toneMappingExposure, exposure, 3, dt);
+    }
     updateFixtures(mode === 'walk' ? feet : undefined);
     const local = feet && (mode === 'walk' || (mode === 'fly' && feet.y < campus.bounds.max.y + 14));
     const radius = local ? (mode === 'walk' ? 25 : 38) : Math.max(campus.size.length() * 0.56, 25);
@@ -549,12 +589,15 @@ export function createCampusLighting(
   return {
     update,
     dispose() {
+      disposed = true;
       for (const mesh of [sky, backdrop]) {
         mesh.removeFromParent();
         mesh.geometry.dispose();
         mesh.material.dispose();
       }
       localReflections?.dispose();
+      bakedLight?.dispose();
+      photoSkyTexture?.dispose();
       reflection.dispose();
       sun.shadow.dispose();
       skyLight.removeFromParent();

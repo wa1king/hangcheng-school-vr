@@ -12,6 +12,8 @@
 
 墙砖、铺地和抹灰按世界坐标叠加颗粒、分缝和磨损。桌面步行视角下，校门广场和中庭铺地可映出校园实景，窗玻璃和金属使用从门廊、中庭捕获的局部反光。触屏和 VR 使用较轻量的反光方案。材质分层和低分辨率反射参考 [Saltline](https://github.com/Megasu/jimao-3a-game/blob/main/index.html#L5484-L5623)。
 
+校门和中庭用校园照片校准植被，使用实拍 HDR 天空并将太阳对齐场景主光。校园模型的天光遮挡与间接反射离线计算，运行时叠加直射日光和室内曝光变化。实拍素材与离线光照流程参考 [CROSSTOWN 技术调研](https://ibw30loq2af.sg.larksuite.com/wiki/FlxHwL2JViYo8Oku1TTlF8rzgoe)。
+
 ## 本地运行
 
 需要 Node.js 22.14 或以上。运行 `npm ci`，再运行 `npm run dev`。`npm run build` 生成 `dist`。GitHub Pages 从 `main` 分支的 `docs` 目录发布。
@@ -19,6 +21,8 @@
 主界面左下角显示构建版本号。每次发布构建按北京时间自动生成 `YYYY.MM.DD-HHMMSS`。
 
 `tools/build_campus.py` 生成校舍 `campus.glb` 和周边街区 `surroundings.glb`。重新生成时需要 Python 3.11 或以上、NumPy、Pillow、Shapely、Mapbox Earcut 和 Windows 字体。分别使用 `npx gltfpack@1.3.0 -i public/scene/campus.glb -o public/scene/campus.packed.glb -cc -vpf -vp 16 -vt 16 -vn 10 -kn -km -ke`（周边模型替换文件名）压缩后，用压缩版替换对应的原始文件。渲染和碰撞读取同一份几何，教室窗玻璃双面可见且有碰撞。标线和标牌等表面装饰不参与碰撞。构建后将 `dist` 内容更新到 `docs` 并保留 `.nojekyll`。
+
+更新场景模型或主光后，运行 `node tools/bake-campus-light.mjs` 重新生成 `public/scene/campus-baked-light.bin`。它按 `scene.json` 对应的模型版本生成，浏览器在首帧后加载。
 
 ## 数据与署名
 

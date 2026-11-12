@@ -82,6 +82,7 @@ const compositeFragment = `
   uniform sampler2D tColor;
   uniform sampler2D tOcclusion;
   uniform vec2 uOcclusionSize;
+  uniform float uCameraResponse;
   ${depthFunctions}
 
   float lumaOf(vec3 color) {
@@ -89,13 +90,15 @@ const compositeFragment = `
   }
 
   // Keep a single depth sample at the pixel center, then smooth color edges.
-  vec3 antialiasedColor(vec2 uv) {
+  vec3 antialiasedColor(vec2 uv, out float highlightSpill) {
     vec3 center = texture2D(tColor, uv).rgb;
     float a = lumaOf(texture2D(tColor, uv + vec2(-1.0, -1.0) * uTexel).rgb);
     float b = lumaOf(texture2D(tColor, uv + vec2( 1.0, -1.0) * uTexel).rgb);
     float c = lumaOf(texture2D(tColor, uv + vec2(-1.0,  1.0) * uTexel).rgb);
     float d = lumaOf(texture2D(tColor, uv + vec2( 1.0,  1.0) * uTexel).rgb);
     float middle = lumaOf(center);
+    float neighbourLight = (a * a + b * b + c * c + d * d) * 0.25;
+    highlightSpill = clamp(neighbourLight - max(1.25, middle * middle + 0.12), 0.0, 0.7);
     float minimum = min(middle, min(min(a, b), min(c, d)));
     float maximum = max(middle, max(max(a, b), max(c, d)));
     if (maximum - minimum < max(0.045, maximum * 0.12)) return center;
@@ -117,7 +120,14 @@ const compositeFragment = `
   }
 
   void main() {
-    vec3 color = antialiasedColor(vUv);
+    float highlightSpill;
+    vec3 color = antialiasedColor(vUv, highlightSpill);
+    if (uCameraResponse > 0.0) {
+      // Use the same neighbouring samples as antialiasing, with no extra pass.
+      vec2 lens = vUv * 2.0 - 1.0;
+      float edge = 1.0 - 0.055 * smoothstep(0.34, 1.58, dot(lens, lens));
+      color = (color + vec3(1.0, 0.95, 0.88) * highlightSpill * 0.032) * edge;
+    }
     float depth = texture2D(tDepth, vUv).r;
     if (depth < 0.99999) {
       float distance = distanceAt(vUv);
@@ -140,6 +150,11 @@ const compositeFragment = `
       // The sky shader already owns its display response.
       gl_FragColor = vec4(color, 1.0);
     }
+    if (uCameraResponse > 0.0) {
+      float pixel = fract(dot(gl_FragCoord.xy, vec2(0.1031, 0.11369)));
+      float dither = fract(pixel * (pixel + 17.71)) - 0.5;
+      gl_FragColor.rgb = max(vec3(0.0), gl_FragColor.rgb + dither * 0.0026);
+    }
     #include <colorspace_fragment>
   }
 `;
@@ -148,7 +163,7 @@ const compositeFragment = `
  * Half-resolution contact occlusion reuses the main color pass's depth.
  * Overview, mobile and immersive VR can use the same lighting without this pass.
  */
-export function createCampusRenderer(renderer: THREE.WebGLRenderer) {
+export function createCampusRenderer(renderer: THREE.WebGLRenderer, cameraResponse: boolean) {
   if (!renderer.extensions.has('EXT_color_buffer_float')) return undefined;
 
   const beauty = new THREE.WebGLRenderTarget(1, 1, {
@@ -178,6 +193,7 @@ export function createCampusRenderer(renderer: THREE.WebGLRenderer) {
       tColor: { value: beauty.texture },
       tOcclusion: { value: ambient.texture },
       uOcclusionSize: { value: new THREE.Vector2() },
+      uCameraResponse: { value: cameraResponse ? 1 : 0 },
     },
     vertexShader: fullscreenVertex,
     fragmentShader: compositeFragment,

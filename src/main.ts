@@ -30,6 +30,7 @@ const diagnostics = get('diagnostics');
 const query = new URLSearchParams(window.location.search);
 const debug = query.has('debug');
 const contactOcclusion = !debug || query.get('occlusion') !== '0';
+const cameraResponse = !debug || query.get('camera') !== '0';
 const groundReflections = !debug || query.get('reflection') !== '0';
 const directions = [
   { id: 'north', label: '北', yaw: 0 },
@@ -414,7 +415,7 @@ function frame(time: number, xrFrame?: XRFrame) {
     else moveFlat(dt);
   }
   const feet = mode === 'walk' ? player?.position : mode === 'fly' ? flightFeet : undefined;
-  lighting?.update(mode, feet, firstFramePresented);
+  lighting?.update(mode, feet, firstFramePresented, dt);
   pavement?.update(camera, time, finished && mode === 'walk');
   if (finished && mode !== 'overview' && !input.touch && !renderer.xr.isPresenting && campusRenderer) {
     campusRenderer.render(scene, camera);
@@ -472,7 +473,7 @@ async function initialize() {
     renderer.shadowMap.type = THREE.PCFShadowMap;
     renderer.xr.enabled = true;
     renderer.xr.setReferenceSpaceType('local-floor');
-    if (!input.touch && contactOcclusion) campusRenderer = createCampusRenderer(renderer);
+    if (!input.touch && contactOcclusion) campusRenderer = createCampusRenderer(renderer, cameraResponse);
     surface.tabIndex = 0;
     surface.appendChild(renderer.domElement);
     const resizeObserver = new ResizeObserver(resize);
