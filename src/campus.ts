@@ -12,6 +12,7 @@ type Model = {
   position?: Coordinate;
   rotationY?: number;
   scale?: number;
+  surroundings?: boolean;
 };
 
 type CampusManifest = {
@@ -122,6 +123,7 @@ export async function loadCampus() {
     if (typeof model?.url !== 'string'
       || (model.position !== undefined && !validCoordinate(model.position))
       || (model.rotationY !== undefined && !Number.isFinite(model.rotationY))
+      || (model.surroundings !== undefined && typeof model.surroundings !== 'boolean')
       || (model.scale !== undefined && (!Number.isFinite(model.scale) || model.scale <= 0))) {
       throw new Error('校园模型的文件路径或坐标无效。');
     }
@@ -146,6 +148,12 @@ export async function loadCampus() {
     wrapper.rotation.y = config.rotationY ?? 0;
     wrapper.scale.setScalar(config.scale ?? 1);
     wrapper.add(asset.scene);
+    if (config.surroundings) {
+      wrapper.traverse(node => {
+        node.userData.surroundings = true;
+        node.userData.shadow = false;
+      });
+    }
     visuals.add(wrapper);
   }
 
@@ -165,8 +173,10 @@ export async function loadCampus() {
       return;
     }
     if (!(object instanceof Mesh)) return;
-    object.castShadow = object.userData.shadow !== false;
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    object.castShadow = object.userData.shadow !== false && materials.some(material => !material.transparent);
     object.receiveShadow = object.userData.shadow !== false;
+    if (object.userData.surroundings) return;
     if (!object.geometry.boundingBox) object.geometry.computeBoundingBox();
     if (object.geometry.boundingBox) bounds.union(object.geometry.boundingBox.clone().applyMatrix4(object.matrixWorld));
   });

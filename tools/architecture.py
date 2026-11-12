@@ -120,6 +120,32 @@ def window_reflection(color):
     return stream.getvalue(), 'image/jpeg'
 
 
+def canopy_texture():
+    rng = random.Random(72013)
+    size = 512
+    image = Image.new('RGB', (size, size), (40, 65, 33))
+    draw = ImageDraw.Draw(image)
+    for _ in range(4100):
+        x, y = rng.randrange(size), rng.randrange(size)
+        length, width = rng.uniform(2.5, 8.1), rng.uniform(1.15, 3.4)
+        angle = rng.uniform(0, math.tau)
+        dx, dy = math.cos(angle), math.sin(angle)
+        tint = rng.randrange(-21, 25)
+        leaf = (76 + tint, 110 + tint, 52 + tint // 2)
+        for ox, oy in ((0, 0), (size, 0), (-size, 0), (0, size), (0, -size)):
+            cx, cy = x + ox, y + oy
+            if not (-9 < cx < size + 9 and -9 < cy < size + 9):
+                continue
+            draw.polygon([(cx+length*dx, cy+length*dy), (cx-width*dy, cy+width*dx),
+                          (cx-length*dx, cy-length*dy), (cx+width*dy, cy-width*dx)], fill=leaf)
+            if length > 5.8:
+                draw.line((cx-length*dx*.7, cy-length*dy*.7, cx+length*dx*.6, cy+length*dy*.6),
+                          fill=(leaf[0]+17, leaf[1]+15, leaf[2]+12))
+    stream = BytesIO()
+    image.save(stream, 'JPEG', quality=88, optimize=True)
+    return stream.getvalue(), 'image/jpeg'
+
+
 OUTWARD_UV = [(1, 1), (1, 0), (0, 0), (0, 1)]
 
 
@@ -136,14 +162,18 @@ def materials(mesh):
         'road': tile((83, 89, 94), 2),
         'walk': tile((168, 159, 148), 11, (158, 149, 139), 'paving'),
         'planter': tile((110, 133, 68), 3),
+        'courtyard-paving': tile((166, 148, 134), 41, (152, 139, 126), 'paving'),
+        'outdoor-wood': tile((144, 110, 77), 51),
+        'bark': tile((113, 92, 73), 42),
     }
     brick_maps = surface_maps('brick', 17)
     paving_maps = surface_maps('paving', 25)
     grain_maps = surface_maps('grain', 32)
     for name, texture in textures.items():
         maps = brick_maps if name in ('beige', 'terra') else (
-            paving_maps if name in ('roof', 'roof-path', 'plaza', 'walk') else grain_maps)
-        mesh.material(name, (255, 255, 255), texture=texture, normal=maps[0], roughness_map=maps[1])
+            paving_maps if name in ('roof', 'roof-path', 'plaza', 'walk', 'courtyard-paving') else grain_maps)
+        mesh.material(name, (255, 255, 255), texture=texture, normal=maps[0], roughness_map=maps[1],
+                      double=name in ('beige', 'terra'))
     for name, rgb, roughness in (
         ('cream', (210, 199, 175), 0.84), ('soffit', (166, 156, 135), 0.9),
         ('reveal', (177, 167, 149), 0.86), ('sill', (203, 198, 184), 0.74),
@@ -151,15 +181,18 @@ def materials(mesh):
         ('door', (122, 129, 120), 0.63),
         ('frame', (103, 110, 108), 0.6), ('brickline', (152, 110, 98), 0.88),
         ('curb', (176, 173, 162), 0.83), ('paint-yellow', (207, 163, 82), 0.79),
-        ('trunk', (99, 82, 65), 0.93), ('leaf0', (56, 88, 48), 0.87),
-        ('leaf1', (70, 106, 56), 0.87), ('leaf2', (91, 125, 58), 0.87),
-        ('leaf3', (103, 135, 68), 0.87), ('hedge', (113, 138, 59), 0.9),
+        ('hedge', (113, 138, 59), 0.9), ('outdoor-steel', (71, 77, 75), 0.62),
+        ('stainless', (154, 161, 159), 0.39),
     ):
-        mesh.material(name, rgb, roughness, double=(name == 'blue-rail'),
+        mesh.material(name, rgb, roughness, double=name in ('blue-rail', 'cream', 'frame', 'door'),
                       solid=name not in ('brickline', 'paint-yellow'))
+    foliage_color = canopy_texture()
+    for i, tone in enumerate((207, 222, 239, 255)):
+        mesh.material(f'leaf{i}', (tone, tone, tone), .86, texture=foliage_color, normal=grain_maps[0])
     for name, color in (('glass-dusk', (57, 79, 92)), ('glass-light', (87, 110, 124)),
                         ('glass-deep', (41, 57, 66)), ('glass-ribbon', (130, 148, 157))):
-        mesh.material(name, (255, 255, 255), 0.25, texture=window_reflection(color))
+        mesh.material(name, (255, 255, 255), 0.25, texture=window_reflection(color), double=True)
+    mesh.material('glass-clear', (133, 164, 171), 0.17, metallic=0.16, double=True, opacity=.33)
     mesh.material('clock-face', (255, 255, 255), 0.71, texture=clock_texture(), solid=False)
     mesh.material('school-name', (255, 255, 255), 0.63, texture=school_sign(), solid=False)
 
@@ -368,10 +401,35 @@ def ground_arcade(mesh, a, b, floor_height):
     gallery_columns(mesh, a, b, 0, floor_height, 3.24, arcade=True)
 
 
+def branch(mesh, a, b, radius_a, radius_b, material='bark', sides=7):
+    axis = np.array(b) - a
+    axis = axis / np.linalg.norm(axis)
+    tangent = np.cross(axis, (0, 0, 1) if abs(axis[2]) < .85 else (1, 0, 0))
+    tangent = tangent / np.linalg.norm(tangent)
+    bitangent = np.cross(axis, tangent)
+    rings = []
+    for center, radius in ((a, radius_a), (b, radius_b)):
+        rings.append([tuple(center + radius*(tangent*math.cos(i*math.tau/sides) +
+                                              bitangent*math.sin(i*math.tau/sides)))
+                      for i in range(sides)])
+    lower, upper = rings
+    for i in range(sides):
+        j = (i + 1) % sides
+        mesh.face(material, (lower[i], lower[j], upper[j], upper[i]))
+    mesh.face(material, upper)
+    mesh.face(material, lower[::-1])
+
+
 def foliage(mesh, x, z, height, seed, y=0):
     rng = random.Random(seed)
     crown = height * rng.uniform(0.39, 0.53)
-    mesh.cylinder('trunk', x, y, z, height * 0.025, height * 0.76, 7)
+    lean_x, lean_z = rng.uniform(-.05, .05) * height, rng.uniform(-.05, .05) * height
+    branch(mesh, (x, y, z), (x + lean_x, y + height*.74, z + lean_z), height*.029, height*.011)
+    for index in range(2):
+        theta = index*math.pi + seed*.61
+        branch(mesh, (x + lean_x*.65, y + height*.38, z + lean_z*.65),
+               (x + height*.19*math.cos(theta), y + height*.69, z + height*.19*math.sin(theta)),
+               height*.013, height*.0055, sides=6)
     sides, clusters = 7, 7
     for cluster in range(clusters):
         angle = cluster * math.tau / (clusters - 1) + rng.uniform(-0.15, 0.15)
@@ -389,6 +447,7 @@ def foliage(mesh, x, z, height, seed, y=0):
                 j = (i + 1) % sides
                 points = (lower[i], upper[i], upper[j], lower[j])
                 mesh.face(f'leaf{rng.choices(range(4), weights=(4-level, 4, 2+level, level+1))[0]}', points,
+                          uv=[(px*.68 + pz*.17, py*.56 + pz*.37) for px, py, pz in points],
                           normals=[(px-cx, (py-cy)*.80, pz-cz) for px, py, pz in points])
         mesh.face('leaf3', list(reversed(levels[-1])))
 
@@ -468,9 +527,10 @@ def northern_hall(mesh, polygon, lower_roof, roof_top):
 
 
 def building(mesh, footprint, ident, floors, floor_height):
-    from access import build_access, build_upper_roof_stair, building_access
+    from access import HALF_WIDTH, build_access, build_upper_roof_stair, building_access
     from connectors import CONNECTOR_AREA, build_connectors
-    from interiors import STAIR_VOID, WING_AREA, add_teaching_wing, courtyard_edge, facade_spans, interior_materials
+    from interiors import (CLASSROOM_EXTERIOR_AREA, STAIR_VOID, WING_AREA, WING_NORTH, add_teaching_wing,
+                           courtyard_edge, draw_classroom_exterior, facade_spans, interior_materials)
 
     poly = orient(Polygon(footprint[0], footprint[1:]).buffer(0), sign=1)
     core = poly.buffer(-1.30, join_style='mitre')
@@ -485,7 +545,17 @@ def building(mesh, footprint, ident, floors, floor_height):
             facades.append((ring_no, a, b, mode, arcade))
 
     access = building_access(ident, [(a, b) for _, a, b, _, _ in facades])
-    interior = WING_AREA if main_building else access.area
+    classroom_edge = None
+    classroom_span = None
+    if main_building:
+        classroom_edge = next((a, b) for ring, a, b, _, _ in facades
+                              if not ring and min(a[0], b[0]) > 34 and max(a[0], b[0]) < 36
+                              and min(a[1], b[1]) < WING_NORTH and max(a[1], b[1]) > 2.48)
+        a, b = classroom_edge
+        cuts = sorted((WING_NORTH, 2.48), key=lambda z: (z-a[1])/(b[1]-a[1]))
+        classroom_span = tuple(position(a, b, (z-a[1])/(b[1]-a[1])) for z in cuts)
+        draw_classroom_exterior(mesh, *classroom_span, floors, floor_height)
+    interior = WING_AREA.union(CLASSROOM_EXTERIOR_AREA) if main_building else access.area
     upper_interior = interior.union(CONNECTOR_AREA) if main_building else interior
     stair_void = STAIR_VOID if main_building else access.stair_void
     indoor_floor = poly.intersection(interior)
@@ -496,7 +566,7 @@ def building(mesh, footprint, ident, floors, floor_height):
     gallery_recess = facade_recess([(a, b) for _, a, b, mode, _ in facades if mode == 'corridor'], gallery_depth)
     upper_core = core.difference(gallery_recess.union(upper_interior))
     if main_building:
-        interior_materials(mesh, tile, floors)
+        interior_materials(mesh, floors)
         entry_opening = box(-0.45, 25.2, 22.05, 37.8)
         arcade_recess = facade_recess([(a, b) for _, a, b, _, arcade in facades if arcade], 3.24)
         core_sections = (
@@ -538,30 +608,33 @@ def building(mesh, footprint, ident, floors, floor_height):
     for k, (ring_no, a, b, mode, arcade) in enumerate(facades):
         length = math.dist(a, b)
         middle_x, middle_z = position(a, b, 0.5)
-        access_front = access is not None and access.edge == (a, b)
-        if access_front:
-            draw_access_front(mesh, a, b, floor_height, mode, ident)
-        if mode == 'ribbon':
-            if not access_front:
-                line_rect(mesh, 'beige', a, b, 0, floor_height, 0.12)
-            for floor in range(1, floors):
-                ribbon_windows(mesh, a, b, floor * floor_height, floor_height)
-            continue
-
         over_entry = main_building and -2.6 < middle_x < 25.6 and 25.1 < middle_z < 36.8 and length > 18
         opens_to_wing = main_building and ring_no and courtyard_edge(a, b)
         if opens_to_wing:
-            add_teaching_wing(mesh, (a, b), floor_height, floors)
-        spans = facade_spans(a, b) if opens_to_wing else [(a, b, False)]
+            add_teaching_wing(mesh, (a, b), floor_height, floors, classroom_span)
+            spans = facade_spans(a, b)
+        elif classroom_edge == (a, b):
+            left, right = classroom_span
+            spans = [(a, left, False), (right, b, False)]
+        elif access is not None and access.edge == (a, b):
+            left, right = access.point(-HALF_WIDTH, 0), access.point(HALF_WIDTH, 0)
+            spans = [(a, left, False), (right, b, False)]
+        else:
+            spans = [(a, b, False)]
         for start, stop, indoor in spans:
             span = math.dist(start, stop)
-            if indoor:
+            if indoor or span < .02:
+                continue
+            if mode == 'ribbon':
+                line_rect(mesh, 'beige', start, stop, 0, floor_height, 0.12)
+                for floor in range(1, floors):
+                    ribbon_windows(mesh, start, stop, floor * floor_height, floor_height)
                 continue
             for floor in range(floors):
                 if floor == 0 and arcade:
                     ground_arcade(mesh, start, stop, floor_height)
                     continue
-                if floor == 0 and (over_entry or access_front):
+                if floor == 0 and over_entry:
                     continue
                 y = floor * floor_height
                 visible_mode = 'classroom' if floor == 0 and mode in ('fins', 'corridor') else mode
@@ -577,17 +650,6 @@ def building(mesh, footprint, ident, floors, floor_height):
                 if visible_mode == 'corridor':
                     corridor_rail(mesh, start, stop, y)
                     gallery_columns(mesh, start, stop, y, floor_height, gallery_depth)
-
-
-def draw_access_front(mesh, a, b, height, mode, seed):
-    length = math.dist(a, b)
-    left, right = position(a, b, .5 - 1.22/length), position(a, b, .5 + 1.22/length)
-    for start, stop in ((a, left), (right, b)):
-        count = max(1, round(math.dist(start, stop) / 4.3))
-        panels(mesh, start, stop, 0, count, .12, 'terracotta' if mode == 'terracotta' else 'classroom', seed, height)
-    line_rect(mesh, 'beige', left, right, 2.64, height - 2.64)
-    for end in (left, right):
-        mesh.box('beige', end[0], 0, end[1], .20, 2.64, .26)
 
 
 def clock_tower(mesh, x, z):
@@ -644,5 +706,16 @@ def entrance(mesh):
         top = (step + 1) * 0.145
         mesh.box('plaza', 10.75, 0, (start_z + finish_z) / 2, 17.1, top, start_z - finish_z)
         mesh.strip('reveal', (2.24, start_z - 0.042), (19.26, start_z - 0.042), 0.044, top + 0.002)
+
+    for x in (2.38, 19.12):
+        start_z, stop_z = 53.45, 50.45
+        branch(mesh, (x, 1.02, start_z), (x, 2.09, stop_z), .024, .024, 'stainless')
+        branch(mesh, (x, 2.09, stop_z), (x, 2.09, 49.71), .024, .024, 'stainless')
+        for z in (start_z, 52.5, 51.5, stop_z, 49.71):
+            step = min(8, int((53.6-z)/.42) + 1)
+            ground = step*.145
+            top = min(2.09, 1.02 + (start_z-z)*(2.09-1.02)/(start_z-stop_z))
+            mesh.cylinder('stainless', x, ground, z, .021, top-ground, 7)
+            mesh.cylinder('stainless', x, ground, z, .047, .019, 8)
     mesh.box('plaza', 10.75, 0, 35.9, 17.1, 1.16, 8.8)
     mesh.face('plaza', [(2.2, -0.03, 24.2), (2.2, 1.16, 31.5), (19.3, 1.16, 31.5), (19.3, -0.03, 24.2)])

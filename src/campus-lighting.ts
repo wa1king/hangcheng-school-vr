@@ -5,16 +5,16 @@ import type { Mode } from './input.ts';
 type Campus = Awaited<ReturnType<typeof loadCampus>>;
 type Surface = { y: number; normal: { x: number; y: number; z: number } };
 
-const sunDirection = new THREE.Vector3(-0.48, 0.76, 0.43).normalize();
-const haze = new THREE.Color('#b6cad4');
-const zenith = new THREE.Color('#6195cb');
+const sunDirection = new THREE.Vector3(-0.62, 0.69, 0.38).normalize();
+const haze = new THREE.Color('#bed0d9');
+const zenith = new THREE.Color('#568bc6');
 
 function createSky(radius: number) {
   const material = new THREE.ShaderMaterial({
     uniforms: {
       uZenith: { value: zenith },
       uHorizon: { value: haze },
-      uCloud: { value: new THREE.Color('#edf0ea') },
+      uCloud: { value: new THREE.Color('#f3f5ef') },
       uSun: { value: sunDirection },
     },
     vertexShader: `
@@ -42,21 +42,27 @@ function createSky(radius: number) {
         float upper = mix(hash(cell + vec2(0.0, 1.0)), hash(cell + vec2(1.0)), f.x);
         return mix(lower, upper, f.y);
       }
+      float cloudDensity(vec2 p) {
+        float mass = noise(p) * 0.58 + noise(p * 2.13 + 12.0) * 0.27
+          + noise(p * 4.19 - 7.0) * 0.105 + noise(p * 8.3 + 3.0) * 0.045;
+        return smoothstep(0.53, 0.73, mass);
+      }
       void main() {
         vec3 dir = normalize(vDirection);
         float elevation = max(0.0, dir.y);
-        vec3 color = mix(uHorizon, uZenith, smoothstep(-0.02, 0.92, dir.y));
+        vec3 color = mix(uHorizon, uZenith, pow(smoothstep(-0.026, 0.86, dir.y), 0.71));
         float solar = max(0.0, dot(dir, uSun));
-        color = mix(color, uCloud, 0.32 * pow(solar, 14.0));
-        if (elevation > 0.055) {
-          vec2 p = dir.xz * vec2(2.5, 3.8) / (elevation + 0.12) + vec2(6.0, -1.0);
-          float cloud = noise(p) * 0.62 + noise(p * 2.05 + 14.0) * 0.26
-            + noise(p * 4.1 + 4.0) * 0.12;
-          float coverage = smoothstep(0.59, 0.78, cloud)
-            * smoothstep(0.055, 0.29, elevation);
-          color = mix(color, uCloud, coverage * 0.70);
+        color = mix(color, vec3(0.91, 0.88, 0.81), 0.22 * pow(solar, 9.0));
+        if (elevation > 0.048) {
+          vec2 p = dir.xz * vec2(2.38, 3.42) / (elevation + 0.108) + vec2(6.0, -1.0);
+          float coverage = cloudDensity(p);
+          float upstream = cloudDensity(p + uSun.xz * 0.29);
+          float highlight = clamp(0.72 + (coverage - upstream) * 0.37, 0.48, 1.0);
+          vec3 underside = vec3(0.55, 0.63, 0.72);
+          vec3 litCloud = mix(underside, uCloud, highlight);
+          color = mix(color, litCloud, coverage * smoothstep(0.048, 0.25, elevation) * 0.87);
         }
-        color = mix(color, vec3(1.0, 0.94, 0.82), smoothstep(0.99965, 0.99992, solar) * 0.75);
+        color = mix(color, vec3(1.0, 0.97, 0.88), smoothstep(0.99984, 0.99996, solar) * 0.94);
         gl_FragColor = vec4(color, 1.0);
         #include <colorspace_fragment>
       }`,
@@ -72,10 +78,11 @@ function createSky(radius: number) {
 }
 
 function createSkyReflection() {
-  const width = 128, height = 64;
-  const pixels = new Uint8Array(width * height * 4);
-  const ground = new THREE.Color('#838a78');
-  const sunlight = new THREE.Color('#fff1d7');
+  const width = 192, height = 96;
+  const pixels = new Uint16Array(width * height * 4);
+  const ground = new THREE.Color('#69725e');
+  const sunlight = new THREE.Color('#fff0d7');
+  const toHalf = THREE.DataUtils.toHalfFloat;
   const color = new THREE.Color();
   for (let y = 0; y < height; y += 1) {
     const latitude = ((y + 0.5) / height - 0.5) * Math.PI;
@@ -87,19 +94,80 @@ function createSkyReflection() {
         + Math.sin(longitude) * sunDirection.z) + elevation * sunDirection.y);
       color.copy(haze);
       if (elevation >= 0) color.lerp(zenith, THREE.MathUtils.smoothstep(elevation, 0, 0.92));
-      else color.lerp(ground, THREE.MathUtils.smoothstep(-elevation, 0.04, 0.57));
-      color.lerp(sunlight, 0.42 * sun ** 14);
+      else color.lerp(ground, THREE.MathUtils.smoothstep(-elevation, 0, 0.38));
+      const cloud = THREE.MathUtils.smoothstep(
+        Math.sin(longitude * 3.0 + latitude * 13.1) * 0.62
+          + Math.cos(longitude * 7.0 - latitude * 25.1) * 0.25
+          + Math.sin(longitude * 11 + latitude * 37.0) * 0.13,
+        0.27, 0.86,
+      ) * THREE.MathUtils.smoothstep(elevation, 0.06, 0.43);
+      color.lerp(sunlight, cloud * 0.37).multiplyScalar(0.75 + Math.max(0, elevation) * 0.53);
+      const intensity = 0.53 * sun ** 21 + 2.6 * sun ** 225;
+      color.r += sunlight.r * intensity;
+      color.g += sunlight.g * intensity;
+      color.b += sunlight.b * intensity;
       const index = (y * width + x) * 4;
-      pixels.set([Math.round(color.r * 255), Math.round(color.g * 255), Math.round(color.b * 255), 255], index);
+      pixels.set([toHalf(color.r), toHalf(color.g), toHalf(color.b), toHalf(1)], index);
     }
   }
-  const texture = new THREE.DataTexture(pixels, width, height);
+  const texture = new THREE.DataTexture(pixels, width, height, THREE.RGBAFormat, THREE.HalfFloatType);
   texture.mapping = THREE.EquirectangularReflectionMapping;
   texture.colorSpace = THREE.LinearSRGBColorSpace;
   texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.needsUpdate = true;
   return texture;
+}
+
+/** Find the centers of the actual lamp boxes in the merged campus model. */
+function collectFixtures(mesh: THREE.Mesh, centers: THREE.Vector3[]) {
+  const geometry = mesh.geometry;
+  const position = geometry.getAttribute('position');
+  if (!position) return;
+  const point = new THREE.Vector3();
+  const bounds: THREE.Box3[] = [];
+  const slots = new Map<string, number>();
+  const representatives: number[] = [];
+  const parents: number[] = [];
+  const points: THREE.Vector3[] = [];
+  const root = (node: number): number => {
+    while (parents[node] !== node) {
+      parents[node] = parents[parents[node]];
+      node = parents[node];
+    }
+    return node;
+  };
+  for (let index = 0; index < position.count; index += 1) {
+    point.fromBufferAttribute(position, index).applyMatrix4(mesh.matrixWorld);
+    const key = `${Math.round(point.x * 500)},${Math.round(point.y * 500)},${Math.round(point.z * 500)}`;
+    let slot = slots.get(key);
+    if (slot === undefined) {
+      slot = points.length;
+      slots.set(key, slot);
+      points.push(point.clone());
+      parents.push(slot);
+    }
+    representatives[index] = slot;
+  }
+  const indices = geometry.index;
+  const count = indices?.count ?? position.count;
+  for (let i = 0; i + 2 < count; i += 3) {
+    const a = root(representatives[indices?.getX(i) ?? i]);
+    const b = root(representatives[indices?.getX(i + 1) ?? i + 1]);
+    const c = root(representatives[indices?.getX(i + 2) ?? i + 2]);
+    parents[b] = a;
+    parents[c] = a;
+  }
+  for (const [index, p] of points.entries()) {
+    const component = root(index);
+    (bounds[component] ??= new THREE.Box3()).expandByPoint(p);
+  }
+  for (const box of bounds) {
+    if (!box || box.getSize(point).lengthSq() < 0.14 ** 2) continue;
+    const center = box.getCenter(new THREE.Vector3());
+    center.y = box.min.y - 0.045;
+    centers.push(center);
+  }
 }
 
 function createContactShadow() {
@@ -148,30 +216,43 @@ export function createCampusLighting(
   );
   backdrop.rotation.x = -Math.PI / 2;
   backdrop.position.set(campus.center.x, campus.bounds.min.y - 0.36, campus.center.z);
-  const skyLight = new THREE.HemisphereLight('#e4efff', '#b4a58e', 1.67);
-  const reflectedLight = new THREE.AmbientLight('#f5eee7', 0.17);
-  const sun = new THREE.DirectionalLight('#fff1d7', 3.25);
+  const skyLight = new THREE.HemisphereLight('#dceaff', '#b7a889', 0.98);
+  const reflectedLight = new THREE.AmbientLight('#eae6dc', 0.13);
+  const sun = new THREE.DirectionalLight('#fff2dc', 3.43);
   const sunOffset = sunDirection.clone().multiplyScalar(span * 1.30);
   sun.castShadow = true;
   const mapSize = mobile ? 1024 : 2048;
   sun.shadow.mapSize.set(mapSize, mapSize);
-  sun.shadow.intensity = 0.90;
+  sun.shadow.intensity = 0.94;
   sun.shadow.radius = 2;
   const blob = createContactShadow();
   const reflection = createSkyReflection();
-  scene.add(sky, backdrop, skyLight, reflectedLight, sun, sun.target, blob);
+  const fixtures: THREE.Vector3[] = [];
+  const roomLights = [new THREE.PointLight('#fff0d8', 0, 5.2, 2), new THREE.PointLight('#fff0d8', 0, 5.2, 2)];
+  scene.add(sky, backdrop, skyLight, reflectedLight, sun, sun.target, blob, ...roomLights);
   if (campus.manifest.collisionFromModels) campus.collision.add(backdrop.clone());
+  campus.visuals.updateMatrixWorld(true);
+  const updated = new Set<THREE.Material>();
   campus.visuals.traverse(object => {
     if (!(object instanceof THREE.Mesh)) return;
     const materials = Array.isArray(object.material) ? object.material : [object.material];
+    if (materials.every(material => material.name === 'glass-clear')) object.castShadow = false;
+    if (materials.every(material => material.name === 'teaching-lamp')) collectFixtures(object, fixtures);
     for (const material of materials) {
-      if (!(material instanceof THREE.MeshStandardMaterial)) continue;
+      if (!(material instanceof THREE.MeshStandardMaterial) || updated.has(material)) continue;
+      updated.add(material);
       if (material.name === 'teaching-lamp') {
-        material.emissive.set('#fff2d8');
-        material.emissiveIntensity = 0.55;
+        material.emissive.set('#fff1db');
+        material.emissiveIntensity = 1.05;
       } else if (material.name.startsWith('glass-')) {
         material.envMap = reflection;
-        material.envMapIntensity = 0.42;
+        material.envMapIntensity = material.name === 'glass-clear' ? 1.42 : 1.02;
+        material.roughness = Math.min(material.roughness, 0.25);
+        if (material.name !== 'glass-clear') material.metalness = Math.max(material.metalness, 0.11);
+      } else if (['teaching-metal', 'frame', 'blue-rail', 'blue-cap', 'stand_steel'].includes(material.name)) {
+        material.envMap = reflection;
+        material.envMapIntensity = 0.48;
+        material.metalness = Math.max(material.metalness, 0.27);
       }
     }
   });
@@ -182,8 +263,37 @@ export function createCampusLighting(
   const contactLift = campus.manifest.collisionFromModels ? 0.019 : 0.043;
   let currentRadius = 0;
 
+  function updateFixtures(feet?: THREE.Vector3) {
+    let nearest: THREE.Vector3 | undefined;
+    let runnerUp: THREE.Vector3 | undefined;
+    let d1 = 5.4 ** 2, d2 = 5.4 ** 2;
+    if (feet) {
+      for (const fixture of fixtures) {
+        const rise = fixture.y - feet.y;
+        if (rise < 1.92 || rise > 3.95) continue;
+        const distance = (fixture.x - feet.x) ** 2 + (fixture.z - feet.z) ** 2;
+        if (distance < d1) {
+          runnerUp = nearest;
+          d2 = d1;
+          nearest = fixture;
+          d1 = distance;
+        } else if (distance < d2) {
+          runnerUp = fixture;
+          d2 = distance;
+        }
+      }
+    }
+    for (const [index, light] of roomLights.entries()) {
+      const fixture = index ? runnerUp : nearest;
+      const distance = index ? d2 : d1;
+      if (fixture) light.position.copy(fixture);
+      light.intensity = fixture ? 4.9 * (1 - THREE.MathUtils.smoothstep(distance, 9, 5.4 ** 2)) : 0;
+    }
+  }
+
   function update(mode: Mode, feet?: THREE.Vector3, surface?: Surface) {
     camera.getWorldPosition(sky.position);
+    updateFixtures(mode === 'walk' ? feet : undefined);
     const local = feet && (mode === 'walk' || (mode === 'fly' && feet.y < campus.bounds.max.y + 14));
     const radius = local ? (mode === 'walk' ? 25 : 38) : Math.max(campus.size.length() * 0.56, 25);
     if (local) focus.set(Math.round(feet.x / 8) * 8, Math.round(feet.y / 8) * 8, Math.round(feet.z / 8) * 8);
@@ -228,6 +338,11 @@ export function createCampusLighting(
       blob.material.alphaMap?.dispose();
       reflection.dispose();
       sun.shadow.dispose();
+      skyLight.removeFromParent();
+      reflectedLight.removeFromParent();
+      sun.removeFromParent();
+      sun.target.removeFromParent();
+      for (const light of roomLights) light.removeFromParent();
     },
   };
 }

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { loadCampus, type CampusPoint } from './campus.ts';
 import { createCampusLighting } from './campus-lighting.ts';
+import { createCampusRenderer } from './campus-render.ts';
 import { createInput, type Mode } from './input.ts';
 import { createLandingQuery } from './landing.ts';
 import { createXrLocomotion } from './xr-locomotion.ts';
@@ -27,7 +28,9 @@ const viewLabel = viewToggle.querySelector<HTMLElement>('.view-label')!;
 const reset = get<HTMLButtonElement>('reset');
 const controlsHint = get('controls-hint');
 const diagnostics = get('diagnostics');
-const debug = new URLSearchParams(window.location.search).has('debug');
+const query = new URLSearchParams(window.location.search);
+const debug = query.has('debug');
+const contactOcclusion = !debug || query.get('occlusion') !== '0';
 const forward = new THREE.Vector3();
 const right = new THREE.Vector3();
 const direction = new THREE.Vector3();
@@ -45,6 +48,7 @@ let player: PlayerController | undefined;
 let landingQuery: ReturnType<typeof createLandingQuery> | undefined;
 let renderer: THREE.WebGLRenderer;
 let lighting: ReturnType<typeof createCampusLighting> | undefined;
+let campusRenderer: ReturnType<typeof createCampusRenderer>;
 let yaw = 0;
 let pitch = 0;
 let avatarHeading = 0;
@@ -397,7 +401,11 @@ function frame(time: number, xrFrame?: XRFrame) {
   const feet = mode === 'walk' ? player?.position : mode === 'fly' ? flightFeet : undefined;
   const ground = feet && tourAvatar.object.visible ? player?.groundSurface(feet) : undefined;
   lighting?.update(mode, feet, ground);
-  renderer.render(scene, camera);
+  if (finished && mode !== 'overview' && !input.touch && !renderer.xr.isPresenting && campusRenderer) {
+    campusRenderer.render(scene, camera);
+  } else {
+    renderer.render(scene, camera);
+  }
   if (debug) {
     const coords = camera.position.toArray().map(value => value.toFixed(2)).join(', ');
     const { calls, triangles } = renderer.info.render;
@@ -435,12 +443,13 @@ async function initialize() {
     renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', logarithmicDepthBuffer: true });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.AgXToneMapping;
-    renderer.toneMappingExposure = 1.20;
+    renderer.toneMappingExposure = 1.04;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.autoUpdate = false;
     renderer.shadowMap.type = THREE.PCFShadowMap;
     renderer.xr.enabled = true;
     renderer.xr.setReferenceSpaceType('local-floor');
+    if (!input.touch && contactOcclusion) campusRenderer = createCampusRenderer(renderer);
     surface.tabIndex = 0;
     surface.appendChild(renderer.domElement);
     const resizeObserver = new ResizeObserver(resize);
@@ -538,6 +547,7 @@ window.addEventListener('pagehide', event => {
   if (event.persisted) return;
   player?.dispose();
   lighting?.dispose();
+  campusRenderer?.dispose();
   tourAvatar.dispose();
   orbit.dispose();
   if (!renderer) return;

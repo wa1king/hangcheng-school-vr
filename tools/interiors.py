@@ -7,8 +7,9 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 from shapely.geometry import box
 
-from connectors import CROSSOVER_DOOR
+from connectors import CROSSOVER_DOOR, overhead_light
 from mesh import signed_area, triangulate
+from surface_textures import birch_laminate, chalkboard, notice_board, porcelain_tiles, terrazzo, weathered_plaster
 
 
 WING_NORTH = -13.1
@@ -25,6 +26,7 @@ STAIR_END = STAIR_START + STAIR_TREAD * STAIR_STEPS
 STAIR_LANDING_END = 10.0
 STAIR_HALF_WIDTH = 0.91
 WING_AREA = box(23.2, WING_NORTH, WING_EAST, WING_SOUTH)
+CLASSROOM_EXTERIOR_AREA = box(WING_EAST - 0.05, WING_NORTH, 35.80, 2.48)
 STAIR_VOID = box(STAIR_X[0] - STAIR_HALF_WIDTH, STAIR_START,
                  STAIR_X[1] + STAIR_HALF_WIDTH, STAIR_LANDING_END)
 
@@ -54,28 +56,34 @@ def sign_texture(title, accent):
     return data.getvalue(), 'image/jpeg'
 
 
-def interior_materials(mesh, tile, floors):
-    mesh.material('teaching-floor', (255, 255, 255), 0.76,
-                  texture=tile((188, 190, 180), 621, (157, 162, 154), 'paving'))
-    stair_texture = tile((156, 159, 153), 622)
-    mesh.material('stair-stone', (255, 255, 255), 0.86, texture=stair_texture)
+def interior_materials(mesh, floors):
+    for name, (color, normal, roughness) in (
+        ('teaching-floor', porcelain_tiles((180, 186, 180), (133, 140, 132), 621)),
+        ('stair-stone', terrazzo((150, 156, 151), 622)),
+        ('teaching-wall', weathered_plaster((227, 224, 211), 627)),
+        ('teaching-dado', porcelain_tiles((158, 178, 168), (132, 152, 141), 632, 10, 8, 288)),
+        ('teaching-wood', birch_laminate((186, 155, 112), 635)),
+        ('teaching-ceiling', weathered_plaster((220, 220, 207), 637, 192)),
+    ):
+        mesh.material(name, (255, 255, 255), 1.0, texture=color, normal=normal, roughness_map=roughness)
     for name, rgb, roughness in (
-        ('teaching-wall', (228, 225, 210), 0.92),
-        ('teaching-dado', (166, 188, 175), 0.82),
-        ('teaching-ceiling', (213, 216, 207), 0.90),
         ('teaching-metal', (68, 84, 80), 0.58),
-        ('teaching-glazing', (126, 151, 149), 0.36),
+        ('teaching-light-shell', (207, 211, 203), 0.57),
         ('teaching-lamp', (246, 245, 226), 0.61),
-        ('teaching-wood', (188, 156, 110), 0.80),
-        ('teaching-wood-edge', (140, 109, 76), 0.85),
+        ('teaching-wood-edge', (144, 116, 84), 0.72),
         ('teaching-chair', (77, 88, 82), 0.83),
         ('chalkboard', (51, 78, 65), 0.95),
         ('classroom-display', (49, 59, 61), 0.39),
     ):
         mesh.material(name, rgb, roughness)
+    mesh.material('teaching-notice', (255, 255, 255), 0.83, texture=notice_board(), solid=False)
+    mesh.material('teaching-chalk-a', (255, 255, 255), 0.88,
+                  texture=chalkboard(641, ('48 ÷ 6 = 8', '6 × 8 = 48')), solid=False)
+    mesh.material('teaching-chalk-b', (255, 255, 255), 0.88,
+                  texture=chalkboard(642, ('36 + 28 = 64', '64 − 28 = 36')), solid=False)
     mesh.material('teaching-paper', (218, 216, 190), 0.95, solid=False)
     mesh.material('stair-nosing', (68, 84, 80), 0.58, solid=False)
-    mesh.material('teaching-threshold', (255, 255, 255), 0.86, texture=stair_texture, solid=False)
+    mesh.material('teaching-threshold', (154, 160, 155), 0.86, solid=False)
     for name, title, accent in (
         ('teaching-sign-entry', '教学楼室内示意', '#ba9e6d'),
         ('teaching-sign-room-a', '示意教室 A', '#afbe95'),
@@ -101,8 +109,69 @@ def wall_along_z(mesh, x_at, start, end, low, high, thickness=0.16, wall='teachi
 def label(mesh, material, x, z, y, width, height=0.24):
     """A sign mounted on a wall looking toward negative site X."""
     a, b = z - width / 2, z + width / 2
-    mesh.face(material, [(x, y, a), (x, y, b), (x, y + height, b), (x, y + height, a)],
+    wall_print(mesh, material, (x, a), (x, b), y, height)
+
+
+def wall_print(mesh, material, a, b, y, height):
+    mesh.face(material, [(a[0], y, a[1]), (b[0], y, b[1]),
+                         (b[0], y + height, b[1]), (a[0], y + height, a[1])],
               uv=[(0, 1), (1, 1), (1, 0), (0, 0)])
+
+
+def glazed_facade(mesh, point, start, end, y, height, openings):
+    """Build a single solid wall with true openings and one pane per window."""
+    def wall(a, b, low, high):
+        if b - a < 0.001 or high - low < 0.001:
+            return
+        segment(mesh, 'beige', point(a, .127), point(b, .127), y + low, high - low, .25)
+        segment(mesh, 'teaching-wall', point(a, .256), point(b, .256), y + low, high - low, .016)
+
+    cursor = start
+    for a, b, sill, head, has_pane in openings:
+        wall(cursor, a, 0, height)
+        wall(a, b, 0, sill)
+        wall(a, b, head, height)
+        frame_a, frame_b = point(a, .142), point(b, .142)
+        segment(mesh, 'teaching-metal', frame_a, frame_b, y + head - .039, .039, .076)
+        for at in (a + .019, b - .019):
+            x, z = point(at, .142)
+            mesh.box('teaching-metal', x, y + sill, z, .051, head - sill, .051)
+        if has_pane:
+            wall_print(mesh, 'glass-clear', point(a, .146), point(b, .146), y + sill, head - sill)
+            segment(mesh, 'cream', point(a, .129), point(b, .129), y + sill - .012, .033, .27)
+            for at in range(1, max(2, round((b - a) / .78))):
+                t = a + (b - a) * at / max(2, round((b - a) / .78))
+                x, z = point(t, .142)
+                mesh.box('teaching-metal', x, y + sill, z, .042, head - sill, .042)
+            segment(mesh, 'teaching-metal', frame_a, frame_b, y + head - .32, .038, .055)
+        cursor = b
+    wall(cursor, end, 0, height)
+
+
+def classroom_wall_x(edge, z):
+    a, b = edge
+    return a[0] + (b[0] - a[0]) * (z - a[1]) / (b[1] - a[1])
+
+
+def draw_classroom_exterior(mesh, a, b, floors, floor_height):
+    def point(z, inset):
+        return classroom_wall_x((a, b), z) - inset, z
+
+    openings = []
+    for north, south in ((WING_NORTH, -4.55), (-4.55, 2.48)):
+        centre = (north + south) / 2
+        openings.extend(((north + .38, centre - 1.58, .90, 2.79, True),
+                         (centre + 1.58, south - .38, .90, 2.79, True)))
+    for level in range(floors):
+        glazed_facade(mesh, point, WING_NORTH, 2.48, level * floor_height, floor_height, openings)
+
+
+def desk_top(mesh, x, y, z, width, depth):
+    a, b, c, d = x - width / 2, z - depth / 2, x + width / 2, z + depth / 2
+    corner = .018
+    points = [(a + corner, b), (c - corner, b), (c, b + corner), (c, d - corner),
+              (c - corner, d), (a + corner, d), (a, d - corner), (a, b + corner)]
+    mesh.prism('teaching-wood-edge', points, y, y + .048, 'teaching-wood')
 
 
 def courtyard_wall(mesh, edge, y, top, level):
@@ -163,7 +232,8 @@ def corridor_partition(mesh, north, south, door_z, y, top, sign, with_window=Tru
         if with_window and start <= window_a < window_b <= end and window_b - window_a > 1.0:
             for lo, hi in ((start, window_a), (window_b, end)):
                 wall_along_z(mesh, x_at, lo, hi, y + 1.12, y + 2.45)
-            wall_along_z(mesh, x_at, window_a, window_b, y + 1.12, y + 2.45, 0.06, 'teaching-glazing')
+            label(mesh, 'glass-clear', CORRIDOR_WALL, (window_a + window_b) / 2,
+                  y + 1.12, window_b - window_a, 1.33)
             for z in (window_a, (window_a + window_b) / 2, window_b):
                 mesh.box('teaching-metal', CORRIDOR_WALL, y + 1.12, z, 0.18, 1.33, 0.038)
             for elevation in (1.12, 2.05, 2.41):
@@ -179,16 +249,20 @@ def corridor_partition(mesh, north, south, door_z, y, top, sign, with_window=Tru
         # An open classroom door rests against the inside return wall.
         mesh.box('teaching-wood', CORRIDOR_WALL + 0.48, y + 0.055, b - 0.09, 0.94, 2.17, 0.065)
         mesh.box('teaching-metal', CORRIDOR_WALL + 0.87, y + 0.99, b - 0.135, 0.11, 0.035, 0.060)
+        start, end = intervals[0 if window_side > 0 else 1]
+        if end - start > 1.36:
+            center = (start + end) / 2
+            mesh.box('teaching-wood-edge', CORRIDOR_WALL - .097, y + 1.31, center, .037, .62, 1.06)
+            label(mesh, 'teaching-notice', CORRIDOR_WALL - .117, center, y + 1.34, 1.00, .56)
     label(mesh, sign, CORRIDOR_WALL - 0.085, door_z, y + 2.67, 1.18, 0.29)
 
 
-def classroom(mesh, y, top, north, south, door_z, index):
+def classroom(mesh, y, top, north, south, door_z, index, exterior_edge):
     centre_z = (north + south) / 2
     for x in (29.20, 30.18, 31.16, 32.14):
         for offset in (-2.25, -1.35, 0.75, 1.65, 2.50):
             z = door_z + offset
-            mesh.box('teaching-wood-edge', x, y + 0.696, z, 0.50, 0.022, 0.62)
-            mesh.box('teaching-wood', x, y + 0.718, z, 0.51, 0.027, 0.63)
+            desk_top(mesh, x, y + .697, z, .51, .63)
             mesh.box('teaching-wood', x + 0.174, y + 0.54, z, 0.027, 0.16, 0.54)
             for dx in (-0.187, 0.187):
                 for dz in (-0.25, 0.25):
@@ -203,26 +277,36 @@ def classroom(mesh, y, top, north, south, door_z, index):
             if offset == (-1.35 if index % 2 == 0 else 1.65):
                 mesh.box('teaching-paper', x - 0.025, y + 0.745, z, 0.19, 0.007, 0.25, index * 0.14)
 
-    # Chalkboards flank an interactive display on the teaching wall.
-    for dz in (-1.90, 1.90):
-        mesh.box('teaching-metal', 33.53, y + 1.08, centre_z + dz, 0.075, 1.37, 1.86)
-        mesh.box('chalkboard', 33.489, y + 1.13, centre_z + dz, 0.021, 1.26, 1.75)
-        mesh.box('teaching-metal', 33.475, y + 1.08, centre_z + dz, 0.10, 0.035, 1.77)
-    mesh.box('teaching-metal', 33.51, y + 1.15, centre_z, 0.13, 1.31, 1.89)
-    mesh.box('classroom-display', 33.44, y + 1.20, centre_z, 0.022, 1.21, 1.78)
+    # The boards occupy the real wall between the two exterior windows.
+    def board_point(z, inset):
+        return classroom_wall_x(exterior_edge, z) - inset, z
+
+    for dz in (-.96, .96):
+        a, b = centre_z + dz - .44, centre_z + dz + .44
+        segment(mesh, 'teaching-metal', board_point(a, .288), board_point(b, .288), y + 1.10, 1.08, .053)
+        segment(mesh, 'chalkboard', board_point(a + .026, .319), board_point(b - .026, .319), y + 1.135, 1.01, .018)
+        segment(mesh, 'teaching-metal', board_point(a, .344), board_point(b, .344), y + 1.09, .034, .085)
+        if dz < 0:
+            wall_print(mesh, 'teaching-chalk-a' if index % 2 == 0 else 'teaching-chalk-b',
+                       board_point(a + .028, .331), board_point(b - .028, .331), y + 1.138, 1.003)
+    a, b = centre_z - .48, centre_z + .48
+    segment(mesh, 'teaching-metal', board_point(a, .299), board_point(b, .299), y + 1.22, .93, .092)
+    segment(mesh, 'classroom-display', board_point(a + .027, .349), board_point(b - .027, .349),
+            y + 1.248, .87, .018)
+    segment(mesh, 'teaching-metal', board_point(a + .02, .319), board_point(b - .02, .319),
+            y + 1.13, .035, .045)
     mesh.box('teaching-wood-edge', 32.88, y, south - 0.67, 0.60, 0.90, 1.05)
-    mesh.box('teaching-wood', 32.88, y + 0.90, south - 0.67, 0.66, 0.038, 1.10)
+    desk_top(mesh, 32.88, y + .90, south - .67, .66, 1.10)
     mesh.box('teaching-wood-edge', 28.30, y, north + 0.34, 1.26, 0.86, 0.43)
-    mesh.box('teaching-wood', 28.30, y + 0.86, north + 0.34, 1.31, 0.035, 0.46)
+    desk_top(mesh, 28.30, y + .86, north + .34, 1.31, .46)
     for x in (27.99, 28.52):
         mesh.box('teaching-metal', x, y + 0.46, north + 0.565, 0.15, 0.022, 0.025)
     for x in (28.75, 30.52, 32.28):
         for z in (centre_z - 1.78, centre_z + 1.78):
-            mesh.box('teaching-metal', x, top - 0.055, z, 0.24, 0.055, 1.28)
-            mesh.box('teaching-lamp', x, top - 0.065, z, 0.20, 0.025, 1.21)
+            overhead_light(mesh, x, z, top, across=True)
     mesh.box('cream', 30.54, top - 0.070, centre_z, 0.80, 0.070, 0.82)
-    for z in (centre_z - 0.23, centre_z + 0.23):
-        mesh.box('teaching-metal', 30.54, top - 0.074, z, 0.53, 0.014, 0.025)
+    for index in range(-4, 5):
+        mesh.box('teaching-metal', 30.54, top - 0.081, centre_z + index * .043, .53, .016, .014)
 
 
 def stair_flight(mesh, left, right, start, direction, low, rise):
@@ -324,7 +408,7 @@ def rooftop_stairhouse(mesh, y):
     label(mesh, 'teaching-sign-roof', east - wall_width / 2 - 0.005, 3.30, y + 1.65, 1.0, 0.26)
 
 
-def add_teaching_wing(mesh, edge, floor_height, floors):
+def add_teaching_wing(mesh, edge, floor_height, floors, classroom_edge):
     for level in range(floors):
         y = level * floor_height
         top = y + floor_height - (0.55 if level == floors - 1 else 0.28)
@@ -343,17 +427,17 @@ def add_teaching_wing(mesh, edge, floor_height, floors):
                 mesh.box('teaching-metal', (left + right) / 2, opening_top - 0.045, z,
                          right - left, 0.045, 0.21)
             else:
-                mesh.box('teaching-wall', (start + WING_EAST) / 2, y, z, WING_EAST - start, top - y, 0.17)
-        mesh.box('teaching-wall', WING_EAST - 0.067, y, (WING_NORTH + WING_SOUTH) / 2,
-                 0.17, top - y, WING_SOUTH - WING_NORTH)
+                end = classroom_wall_x(classroom_edge, z) - .13 if z <= 2.48 else WING_EAST
+                mesh.box('teaching-wall', (start + end) / 2, y, z, end - start, top - y, 0.17)
+        mesh.box('teaching-wall', WING_EAST - 0.067, y, (2.48 + WING_SOUTH) / 2,
+                 0.17, top - y, WING_SOUTH - 2.48)
         for index, (north, south, door_z) in enumerate(((WING_NORTH, -4.55, -9.25), (-4.55, 2.48, -1.30))):
             sign = 'teaching-sign-room-a' if index == 0 else 'teaching-sign-room-b'
             corridor_partition(mesh, north, south, door_z, y, top, sign)
-            classroom(mesh, y, top, north, south, door_z, index + level * 2)
+            classroom(mesh, y, top, north, south, door_z, index + level * 2, classroom_edge)
         corridor_partition(mesh, 2.48, WING_SOUTH, 3.36, y, top, 'teaching-sign-stair', with_window=False)
         for z in (-11.9, -8.1, -4.3, -0.5, 3.3, 7.1, 10.9, 14.7):
-            mesh.box('teaching-metal', 25.48, top - 0.06, z, 0.21, 0.06, 1.55)
-            mesh.box('teaching-lamp', 25.48, top - 0.070, z, 0.17, 0.028, 1.47)
+            overhead_light(mesh, 25.48, z, top, across=True)
         label(mesh, f'teaching-sign-level-{level + 1}', CORRIDOR_WALL - 0.085, 6.15, y + 1.72, 1.0, 0.26)
         stairs(mesh, y, floor_height, roof=(level == floors - 1))
     rooftop_stairhouse(mesh, floor_height * floors + 0.05)

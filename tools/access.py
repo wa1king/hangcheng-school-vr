@@ -5,6 +5,7 @@ from contextlib import contextmanager
 
 from shapely.geometry import Polygon
 
+from connectors import overhead_light
 from mesh import rect
 
 
@@ -126,11 +127,15 @@ def switchback(mesh, base, rise):
 
 
 def furniture(mesh, y):
+    from interiors import desk_top, wall_print
+
     mesh.box('chalkboard', -3.20, y + .95, 9.93, 3.30, 1.12, .07)
-    mesh.box('teaching-wood', -3.35, y, 8.82, 1.10, .80, .60)
+    wall_print(mesh, 'teaching-chalk-b', (-3.99, 9.892), (-4.76, 9.892), y + 1.01, .98)
+    mesh.box('teaching-wood-edge', -3.35, y, 8.82, 1.04, .77, .54)
+    desk_top(mesh, -3.35, y + .77, 8.82, 1.10, .60)
     for u in (-4.66, -2.07):
         for v in (4.87, 6.00, 7.18):
-            mesh.box('teaching-wood', u, y + .69, v, .96, .042, .53)
+            desk_top(mesh, u, y + .69, v, .96, .53)
             for du in (-.39, .39):
                 for dv in (-.18, .18):
                     mesh.box('teaching-metal', u + du, y, v + dv, .038, .69, .038)
@@ -155,7 +160,7 @@ def plaque(mesh, name, u, y, v, width):
 
 
 def build_access(mesh, access, floors, height):
-    from interiors import sign_texture
+    from interiors import glazed_facade, sign_texture, wall_print
 
     room = 'access-room-' + access.label
     room_title = {'西侧活动楼': '活动室 · 示意', '北侧教学楼': '教室 · 示意', '东南综合楼': '研习室 · 示意'}[access.label]
@@ -168,16 +173,20 @@ def build_access(mesh, access, floors, height):
                 mesh.box('teaching-wall', u, y, DEPTH / 2, .16, headroom, DEPTH)
                 mesh.box('teaching-dado', u, y, DEPTH / 2, .175, .95, DEPTH)
             wall_x(mesh, -HALF_WIDTH, HALF_WIDTH, DEPTH-.08, y, headroom)
-            if level:
-                wall_x(mesh, -HALF_WIDTH, HALF_WIDTH, .13, y, .87)
-                wall_x(mesh, -HALF_WIDTH, HALF_WIDTH, .13, y+2.65, headroom-2.65)
-                wall_x(mesh, -HALF_WIDTH, HALF_WIDTH, .13, y+.87, 1.78, 'teaching-glazing')
+            panes = [(-5.83, -2.06, .91, 2.69, True), (2.06, 5.83, .91, 2.69, True)]
+            panes.insert(1, (-1.22, 1.22, .91, 2.69, True) if level else (-1.22, 1.22, 0, 2.64, False))
+            glazed_facade(mesh, lambda u, inset: (u, inset), -HALF_WIDTH, HALF_WIDTH, y, height, panes)
             opening(mesh, -HALF_WIDTH, -.65, -3.22, 1.28, STAIR_START, y, headroom)
             plaque(mesh, room, -3.22, y + 2.65, STAIR_START - .087, 1.64)
+            mesh.box('teaching-wood-edge', -5.05, y + 1.30, STAIR_START - .096, 1.05, .64, .038)
+            wall_print(mesh, 'teaching-notice', (-4.56, STAIR_START - .117),
+                       (-5.54, STAIR_START - .117), y + 1.33, .58)
             mesh.box('teaching-wall', -.65, y, (STAIR_START+DEPTH)/2, .16, headroom, DEPTH-STAIR_START)
             furniture(mesh, y)
             for u in (-3.9, -.8, 2.1, 4.9):
-                mesh.box('teaching-lamp', u, y + headroom - .08, 1.68, 1.36, .08, .22)
+                overhead_light(mesh, u, 1.68, y + headroom)
+            for v in (5.42, 7.45):
+                overhead_light(mesh, -3.43, v, y + headroom, across=True)
             if level:
                 for u in (STAIR_LEFT, STAIR_RIGHT):
                     guard(mesh, (u, STAIR_START), (u, STAIR_BACK), y)

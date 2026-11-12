@@ -56,8 +56,8 @@ class Mesh:
         self.transform = transform
 
     def material(self, name, rgb, roughness=0.85, metallic=0.0, texture=None, double=False,
-                 normal=None, solid=True, roughness_map=None):
-        self.materials[name] = (rgb, roughness, metallic, texture, double, normal, solid, roughness_map)
+                 normal=None, solid=True, roughness_map=None, opacity=1):
+        self.materials[name] = (rgb, roughness, metallic, texture, double, normal, solid, roughness_map, opacity)
 
     def face(self, mat, vertices, triangles=None, uv=None, normals=None):
         points = [self.transform(*p) for p in vertices]
@@ -175,8 +175,8 @@ class Mesh:
         for name, (pos, norms, uv, inds) in self.batches.items():
             if not inds:
                 continue
-            rgb, rough, metal, texture, double, normal, solid, roughness_map = self.materials[name]
-            pbr = {'baseColorFactor': [*(srgb(v) for v in rgb), 1], 'roughnessFactor': rough, 'metallicFactor': metal}
+            rgb, rough, metal, texture, double, normal, solid, roughness_map, opacity = self.materials[name]
+            pbr = {'baseColorFactor': [*(srgb(v) for v in rgb), opacity], 'roughnessFactor': rough, 'metallicFactor': metal}
             material = {'name': name if solid else f'decal-{name}', 'doubleSided': double, 'pbrMetallicRoughness': pbr}
             if texture:
                 pbr['baseColorTexture'] = {'index': add_texture(texture)}
@@ -187,6 +187,8 @@ class Mesh:
                 material['normalTexture'] = {'index': add_texture(normal), 'scale': 0.55}
             if roughness_map:
                 pbr['metallicRoughnessTexture'] = {'index': add_texture(roughness_map)}
+            if opacity < 1:
+                material['alphaMode'] = 'BLEND'
             gltf['materials'].append(material)
             gltf['meshes'][0]['primitives'].append({
                 'attributes': {'POSITION': accessor(pos, 3, bounds=True), 'NORMAL': accessor(norms, 3), 'TEXCOORD_0': accessor(uv, 2)},

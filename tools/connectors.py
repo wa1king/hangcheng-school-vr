@@ -25,8 +25,12 @@ def connector_wall(mesh, a, b, y, top):
 
 def overhead_light(mesh, x, z, top, across=False):
     angle = math.pi / 2 if across else 0
-    mesh.box('teaching-metal', x, top - 0.064, z, 1.36, 0.064, 0.23, angle)
-    mesh.box('teaching-lamp', x, top - 0.074, z, 1.28, 0.024, 0.17, angle)
+    mesh.box('teaching-light-shell', x, top - 0.044, z, 1.36, 0.044, 0.22, angle)
+    mesh.box('teaching-lamp', x, top - 0.057, z, 1.23, 0.019, 0.155, angle)
+    dx, dz = (0, .635) if across else (.635, 0)
+    for sign in (-1, 1):
+        mesh.box('teaching-light-shell', x + sign * dx, top - .052, z + sign * dz,
+                 .067, .052, .215, angle)
 
 
 def reading_area(mesh, y):
@@ -66,4 +70,9 @@ def build_connectors(mesh, floors, floor_height):
         for x in (-28, -12, 4, 20):
             mesh.box('teaching-wood-edge', x, y + 1.04, 31.29, 2.75, 0.99, 0.12)
             mesh.box('chalkboard', x, y + 1.11, 31.22, 2.60, 0.84, 0.025)
+            for px in (x - .66, x + .66):
+                a, b, z = px - .60, px + .60, 31.205
+                mesh.face('teaching-notice', [(b, y + 1.16, z), (a, y + 1.16, z),
+                                             (a, y + 1.90, z), (b, y + 1.90, z)],
+                          uv=[(0, 1), (1, 1), (1, 0), (0, 0)])
         reading_area(mesh, y)

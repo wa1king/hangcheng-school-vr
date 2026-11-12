@@ -23,7 +23,7 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 #viewport canvas { width: 100%; height: 100%; display: block; }
 .shade {
   pointer-events: none;
-  background: linear-gradient(to bottom, #0d241deb 0%, #122b246b 9%, transparent 24%, transparent 73%, #1027209c 91%, #0c2019e8 100%);
+  background: linear-gradient(to bottom, #0d241d9c 0%, #122b2445 7%, transparent 17%, transparent 83%, #1027205e 94%, #0c2019ad 100%);
 }
 
 .header {

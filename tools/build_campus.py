@@ -20,6 +20,7 @@ from architecture import building, entrance, foliage, materials, slab
 from interiors import PORTAL_Z
 from mesh import Mesh, rect, rounded
 from sports import add_sports
+from surroundings import add_surroundings
 
 
 ANGLE = math.radians(-24)
@@ -62,6 +63,9 @@ def landscape(visual, polygons, lines):
     campus = Polygon(polygons[1084438083][0])
     visual.surface('ground', rect(-15, -10, 455, 390), -0.27)
     slab(visual, campus, -0.03, -0.03, 'plaza')
+    slab(visual, box(.8, -14.4, 22.0, 24.4).intersection(campus), -.021, -.021, 'courtyard-paving')
+    for x, z in ((10.6, -1.62), (10.6, 8.70)):
+        garden_bench(visual, x, z)
 
     # Approach road and sidewalk use the mapped centreline. Surface widths are estimated.
     extent = box(-218, -168, 170, 145)
@@ -131,6 +135,18 @@ def landscape(visual, polygons, lines):
             visual.box('blue-rail', x, 0.25, 79.3, 0.037, 1.36, 0.037)
 
 
+def garden_bench(mesh, x, z):
+    for dx in (-.69, .69):
+        for dz in (-.16, .16):
+            mesh.box('outdoor-steel', x+dx, -.021, z+dz, .061, .43, .063)
+        mesh.box('outdoor-steel', x+dx, .35, z+.184, .055, .40, .045)
+        mesh.box('outdoor-steel', x+dx, .348, z, .055, .063, .38)
+    for dz in (-.173, -.058, .058, .173):
+        mesh.box('outdoor-wood', x, .408, z+dz, 1.83, .046, .105)
+    for y in (.59, .70):
+        mesh.box('outdoor-wood', x, y, z+.195, 1.83, .091, .046)
+
+
 def manifest(dest, polygons):
     def world(x, y, z):
         return [round(value, 3) for value in site_to_world(x, y, z)]
@@ -163,7 +179,7 @@ def manifest(dest, polygons):
         'title': '深圳市宝安区航城学校',
         'status': '外观参考重建 · 室内布局示意',
         'description': '航空路 10 号本部。校舍外观参照开放地图和影像，楼内布局为游览示意。可进入教学楼，沿走廊和楼梯走到屋顶。',
-        'models': [{'url': resource('campus.glb')}],
+        'models': [{'url': resource('campus.glb')}, {'url': resource('surroundings.glb'), 'surroundings': True}],
         'collisionFromModels': True,
         'evidenceUrl': './sources.html',
         'spawn': {key: places[0][key] for key in ('position', 'yaw', 'pitch')},
@@ -185,6 +201,9 @@ def main(target=BASE / 'public' / 'scene'):
     add_sports(visual, polygons)
     target.mkdir(parents=True, exist_ok=True)
     count = visual.export(target / 'campus.glb')
+    context = Mesh(site_to_world)
+    add_surroundings(context)
+    context.export(target / 'surroundings.glb')
     manifest(target, polygons)
     print(f'Campus GLB: {count:,} triangles')
 
