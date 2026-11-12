@@ -207,8 +207,7 @@ function createLocalReflections(
     material.customProgramCacheKey = () => `${programKey}|campus-probe-${clear ? 'clear' : 'opaque'}`;
   }
 
-  function bake(index: number) {
-    const center = centers[index];
+  function createCapture() {
     const capture = new THREE.Scene();
     capture.background = scene.background;
     capture.fog = scene.fog;
@@ -229,46 +228,84 @@ function createLocalReflections(
       object.material = Array.isArray(object.material) ? object.material.map(passive) : passive(object.material);
     });
     const captureSky = sky.clone();
-    captureSky.position.copy(center);
     const captureSun = sun.clone();
-    captureSun.target.position.copy(center);
-    captureSun.position.copy(center).addScaledVector(sunDirection, 120);
     captureSun.shadow.mapSize.set(512, 512);
     captureSun.shadow.bias = -.0002;
     captureSun.shadow.normalBias = .04;
     Object.assign(captureSun.shadow.camera, { left: -48, right: 48, top: 48, bottom: -48, near: 55, far: 185 });
     captureSun.shadow.camera.updateProjectionMatrix();
     capture.add(geometry, captureSky, backdrop.clone(), fill.clone(), bounce.clone(), captureSun, captureSun.target);
-    const camera = new THREE.CubeCamera(.2, 840, targets[index]);
-    camera.position.copy(center);
-    const target = renderer.getRenderTarget();
-    const face = renderer.getActiveCubeFace();
-    const mip = renderer.getActiveMipmapLevel();
-    const xr = renderer.xr.enabled;
-    const shadowAuto = renderer.shadowMap.autoUpdate;
-    const shadowNeedsUpdate = renderer.shadowMap.needsUpdate;
-    try {
-      renderer.shadowMap.autoUpdate = false;
-      renderer.shadowMap.needsUpdate = true;
-      camera.update(renderer, capture);
-      baked.setComponent(index, 1);
-    } finally {
-      renderer.setRenderTarget(target, face, mip);
-      renderer.xr.enabled = xr;
-      renderer.shadowMap.autoUpdate = shadowAuto;
-      renderer.shadowMap.needsUpdate = shadowNeedsUpdate;
-      captureSun.shadow.dispose();
-      for (const material of copies.values()) material.dispose();
-    }
+    const camera = new THREE.CubeCamera(.2, 840, targets[0]);
+    camera.coordinateSystem = renderer.coordinateSystem;
+    camera.updateCoordinateSystem();
+
+    return {
+      prepare() {
+        const previousTarget = renderer.getRenderTarget();
+        const previousFace = renderer.getActiveCubeFace();
+        const previousMip = renderer.getActiveMipmapLevel();
+        try {
+          renderer.setRenderTarget(targets[0]);
+          return renderer.compileAsync(capture, camera.children[0] as THREE.PerspectiveCamera);
+        } finally {
+          renderer.setRenderTarget(previousTarget, previousFace, previousMip);
+        }
+      },
+      renderFace(index: number, face: number) {
+        const target = targets[index];
+        if (face === 0) {
+          const center = centers[index];
+          captureSky.position.copy(center);
+          captureSun.target.position.copy(center);
+          captureSun.position.copy(center).addScaledVector(sunDirection, 120);
+          camera.position.copy(center);
+          camera.updateMatrixWorld(true);
+        }
+        const lastFace = face === camera.children.length - 1;
+        const previousTarget = renderer.getRenderTarget();
+        const previousFace = renderer.getActiveCubeFace();
+        const previousMip = renderer.getActiveMipmapLevel();
+        const xr = renderer.xr.enabled;
+        const shadowAuto = renderer.shadowMap.autoUpdate;
+        const shadowNeedsUpdate = renderer.shadowMap.needsUpdate;
+        try {
+          renderer.xr.enabled = false;
+          renderer.shadowMap.autoUpdate = false;
+          renderer.shadowMap.needsUpdate = face === 0;
+          target.texture.generateMipmaps = lastFace;
+          renderer.setRenderTarget(target, face);
+          renderer.state.buffers.depth.setMask(true);
+          renderer.render(capture, camera.children[face] as THREE.PerspectiveCamera);
+          if (lastFace) baked.setComponent(index, 1);
+        } finally {
+          renderer.setRenderTarget(previousTarget, previousFace, previousMip);
+          renderer.xr.enabled = xr;
+          renderer.shadowMap.autoUpdate = shadowAuto;
+          renderer.shadowMap.needsUpdate = shadowNeedsUpdate;
+        }
+        return lastFace;
+      },
+      dispose() {
+        captureSun.shadow.dispose();
+        for (const material of copies.values()) material.dispose();
+      },
+    };
   }
 
-  let frame = 0;
+  let capture: ReturnType<typeof createCapture> | undefined;
+  let face = 0;
   let next = 0;
-  let pending = 0;
+  let nextCaptureAt = 0;
+  let compiling = false;
+  let cancelCapture: (() => void) | undefined;
   function resetAfterContextRestore() {
-    window.clearTimeout(pending);
-    pending = 0;
-    frame = 0;
+    cancelCapture?.();
+    cancelCapture = undefined;
+    capture?.dispose();
+    capture = undefined;
+    nextCaptureAt = 0;
+    compiling = false;
+    face = 0;
     next = 0;
     active.set(0, 0);
     baked.set(0, 0);
@@ -277,27 +314,58 @@ function createLocalReflections(
 
   function update(walking: boolean) {
     active.copy(baked).multiplyScalar(renderer.xr.isPresenting ? 0 : 1);
-    if (next >= targets.length || pending || !walking || renderer.xr.isPresenting) return;
-    // Let the first playable frame arrive before each one-time capture.
-    if (++frame < 16) return;
-    frame = 0;
-    pending = window.setTimeout(() => {
-      pending = 0;
-      if (renderer.xr.isPresenting || renderer.getContext().isContextLost()) return;
+    if (next >= targets.length || cancelCapture || compiling || !walking || renderer.xr.isPresenting) return;
+    const now = performance.now();
+    if (nextCaptureAt === 0) nextCaptureAt = now + 1050;
+    if (now < nextCaptureAt) return;
+    // Build one cube face at a time after the first interactive frames.
+    const renderNextFace = () => {
+      cancelCapture = undefined;
+      if (document.hidden || renderer.xr.isPresenting || renderer.getContext().isContextLost()) return;
       try {
-        bake(next++);
+        if (!capture) {
+          capture = createCapture();
+          if (renderer.extensions.has('KHR_parallel_shader_compile')) {
+            const preparing = capture;
+            compiling = true;
+            void preparing.prepare().catch(error => console.warn('校园反射材质预编译未完成', error)).finally(() => {
+              if (capture === preparing) compiling = false;
+            });
+            return;
+          }
+        }
+        if (capture.renderFace(next, face++)) {
+          face = 0;
+          next += 1;
+        }
       } catch (error) {
         // Materials keep their sky reflections if a driver cannot render the probe.
+        compiling = false;
         console.warn('校园局部反射未能生成', error);
+        face = 0;
+        next += 1;
       }
-    }, 0);
+      nextCaptureAt = performance.now() + 45;
+      if (next >= targets.length) {
+        capture?.dispose();
+        capture = undefined;
+      }
+    };
+    if (typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(renderNextFace, { timeout: 250 });
+      cancelCapture = () => window.cancelIdleCallback(id);
+    } else {
+      const id = window.setTimeout(renderNextFace, 0);
+      cancelCapture = () => window.clearTimeout(id);
+    }
   }
 
   return {
     register,
     update,
     dispose() {
-      window.clearTimeout(pending);
+      cancelCapture?.();
+      capture?.dispose();
       renderer.domElement.removeEventListener('webglcontextrestored', resetAfterContextRestore);
       for (const target of targets) target.dispose();
     },
@@ -487,9 +555,9 @@ export function createCampusLighting(
     }
   }
 
-  function update(mode: Mode, feet?: THREE.Vector3, surface?: Surface) {
+  function update(mode: Mode, feet?: THREE.Vector3, surface?: Surface, firstFramePresented = true) {
     camera.getWorldPosition(sky.position);
-    localReflections?.update(mode !== 'overview');
+    localReflections?.update(firstFramePresented && mode !== 'overview');
     updateFixtures(mode === 'walk' ? feet : undefined);
     const local = feet && (mode === 'walk' || (mode === 'fly' && feet.y < campus.bounds.max.y + 14));
     const radius = local ? (mode === 'walk' ? 25 : 38) : Math.max(campus.size.length() * 0.56, 25);

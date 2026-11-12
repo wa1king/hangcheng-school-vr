@@ -190,14 +190,17 @@ function createAvatar() {
 
 let rapierReady: Promise<void> | undefined;
 
+export function preparePlayerPhysics() {
+  return rapierReady ??= RAPIER.init();
+}
+
 export async function createPlayerController(
   environment: THREE.Object3D,
   spawn: THREE.Vector3,
   avatarModel?: PlayerAvatar,
   repairMeshEdges = false,
 ): Promise<PlayerController> {
-  rapierReady ??= RAPIER.init();
-  await rapierReady;
+  await preparePlayerPhysics();
   const { vertices, indices } = environmentCollision(environment);
   const world = new RAPIER.World({ x: 0, y: -GRAVITY, z: 0 });
   const staticColliders = new Map<string, RAPIER.Collider>();

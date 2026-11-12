@@ -60,6 +60,7 @@ let selectedAvatar: TourCharacter = 'taoqi';
 let savedWalkYaw = 0;
 let savedWalkPitch = 0;
 let finished = false;
+let firstFramePresented = false;
 let lastFrame: number | undefined;
 let xrSession: XRSession | undefined;
 let landingNotice = '';
@@ -403,12 +404,16 @@ function frame(time: number, xrFrame?: XRFrame) {
   }
   const feet = mode === 'walk' ? player?.position : mode === 'fly' ? flightFeet : undefined;
   const ground = feet && tourAvatar.object.visible ? player?.groundSurface(feet) : undefined;
-  lighting?.update(mode, feet, ground);
+  lighting?.update(mode, feet, ground, firstFramePresented);
   pavement?.update(camera, time, finished && mode === 'walk');
   if (finished && mode !== 'overview' && !input.touch && !renderer.xr.isPresenting && campusRenderer) {
     campusRenderer.render(scene, camera);
   } else {
     renderer.render(scene, camera);
+  }
+  if (!firstFramePresented) {
+    firstFramePresented = true;
+    notice.hidden = true;
   }
   if (debug) {
     const coords = camera.position.toArray().map(value => value.toFixed(2)).join(', ');
@@ -444,6 +449,10 @@ function configureInfo(manifest: NonNullable<typeof campus>['manifest'], manifes
 
 async function initialize() {
   try {
+    const pendingPlayer = import('./exploration/player.ts').then(async controller => {
+      await controller.preparePlayerPhysics();
+      return controller;
+    }).catch((loadError: unknown) => ({ loadError }));
     renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', logarithmicDepthBuffer: true });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.AgXToneMapping;
@@ -459,16 +468,13 @@ async function initialize() {
     const resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(surface);
     resize();
-    renderer.setAnimationLoop(frame);
     diagnostics.hidden = !debug;
     fullscreen.hidden = !document.fullscreenEnabled;
 
-    const pendingPlayer = import('./exploration/player.ts').catch((loadError: unknown) => ({ loadError }));
     campus = await loadCampus();
     scene.add(campus.visuals);
     lighting = createCampusLighting(scene, camera, renderer, campus, input.touch);
     pavement = createCampusGroundReflection(renderer, scene, campus.visuals, groundReflections && !input.touch);
-    showOverview();
     configureInfo(campus.manifest, campus.manifestURL);
     if (campus.collision.children.length) {
       try {
@@ -491,9 +497,12 @@ async function initialize() {
     if (!player && campus.collision.children.length === 0) get('description').append(' 当前场景支持总览与飞行。');
     resetFeet(campus.manifest.spawn);
     finished = true;
-    notice.hidden = true;
     if (player) setMode('walk');
-    else updateHud();
+    else {
+      showOverview();
+      updateHud();
+    }
+    renderer.setAnimationLoop(frame);
     void initializeVR();
   } catch (error) {
     console.error(error);

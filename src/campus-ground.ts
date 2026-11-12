@@ -154,7 +154,7 @@ export function createCampusGroundReflection(
       const s = uniforms.uCampusSiteRotation.value.y;
       sitePosition.set(c * cameraPosition.x + s * cameraPosition.z, -s * cameraPosition.x + c * cameraPosition.z);
       if (!supported || !walking || renderer.xr.isPresenting || look.y > .58 || cameraPosition.y < .35 || cameraPosition.y > 4.2
-        || sitePosition.x < -20 || sitePosition.x > 48 || sitePosition.y < -32 || sitePosition.y > 98) {
+        || sitePosition.x < -20 || sitePosition.x > 48 || sitePosition.y < -32 || sitePosition.y > 78) {
         invalidate();
         return;
       }
