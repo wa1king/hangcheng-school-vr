@@ -13,7 +13,9 @@ if EXTRA.is_dir():
     sys.path.insert(0, str(EXTRA))
 
 from shapely.geometry import LineString, Point, Polygon, box
+from shapely.geometry.polygon import orient
 
+from access import building_access
 from architecture import building, entrance, foliage, materials, slab
 from interiors import PORTAL_Z
 from mesh import Mesh, rect, rounded
@@ -56,10 +58,9 @@ def read_data():
     return polygons, lines
 
 
-def landscape(visual, collision, polygons, lines):
+def landscape(visual, polygons, lines):
     campus = Polygon(polygons[1084438083][0])
     visual.surface('ground', rect(-15, -10, 455, 390), -0.27)
-    collision.surface('walkable', rect(-15, -10, 440, 375), 0)
     slab(visual, campus, -0.03, -0.03, 'plaza')
 
     # Approach road and sidewalk use the mapped centreline. Surface widths are estimated.
@@ -128,10 +129,9 @@ def landscape(visual, collision, polygons, lines):
         for i in range(round((b - a) / 0.19)):
             x = a + i * 0.19
             visual.box('blue-rail', x, 0.25, 79.3, 0.037, 1.36, 0.037)
-        collision.strip('collider', (a, 79.3), (b, 79.3), 0.20, 0, 1.66)
 
 
-def manifest(dest, campus_outline):
+def manifest(dest, polygons):
     def world(x, y, z):
         return [round(value, 3) for value in site_to_world(x, y, z)]
 
@@ -150,16 +150,23 @@ def manifest(dest, campus_outline):
               location('teaching-entrance', '教学楼室内示意入口', 20.2, PORTAL_Z, -math.pi / 2),
               location('teaching-upper', '二层示意走廊', 25.55, 3.30, y=TEACHING_FLOOR_HEIGHT),
               location('east', '东侧教学楼', 41, 62.5, -1.34),
-              location('basketball', '北侧球场', 27.0, -62.7)]
+              location('basketball', '北侧球场', 27.0, -62.7),
+              location('main-roof', '主楼屋顶示意', 31.3, 0.55, 0, y=TEACHING_FLOOR_HEIGHT * 4 + .05)]
+    for ident, place_id in ((1448555207, 'activity-entry'), (1448555203, 'north-entry'),
+                            (1448555206, 'southeast-entry')):
+        edge = list(orient(Polygon(polygons[ident][0]), sign=1).exterior.coords)
+        access = building_access(ident, zip(edge, edge[1:]))
+        x, z = access.point(0, -2.40)
+        heading = math.atan2(access.dz, -access.dx)
+        places.append(location(place_id, f'{access.label}入口', x, z, heading))
     data = {
         'title': '深圳市宝安区航城学校',
         'status': '外观参考重建 · 室内布局示意',
-        'description': '航空路 10 号本部。校舍外观参照开放地图和影像，建筑尺寸待实测。可从中庭走进示意教学区，沿走廊和楼梯进入两层教室。',
+        'description': '航空路 10 号本部。校舍外观参照开放地图和影像，楼内布局为游览示意。可进入教学楼，沿走廊和楼梯走到屋顶。',
         'models': [{'url': resource('campus.glb')}],
-        'collisionUrl': resource('collision.glb'),
+        'collisionFromModels': True,
         'evidenceUrl': './sources.html',
         'spawn': {key: places[0][key] for key in ('position', 'yaw', 'pitch')},
-        'landingBoundary': [[wx, wz] for wx, _, wz in (world(x, 0, z) for x, z in campus_outline[:-1])],
         'overview': {'target': world(-20, 2, -14), 'position': world(111, 150, 174)},
         'locations': places,
     }
@@ -168,21 +175,18 @@ def manifest(dest, campus_outline):
 
 def main(target=BASE / 'public' / 'scene'):
     polygons, lines = read_data()
-    visual, collision = Mesh(site_to_world), Mesh(site_to_world)
+    visual = Mesh(site_to_world)
     materials(visual)
-    collision.material('collider', (128, 128, 128), double=True)
-    collision.material('walkable', (128, 128, 128), double=True)
-    landscape(visual, collision, polygons, lines)
+    landscape(visual, polygons, lines)
     for ident, floors, height in ((19808442, 4, TEACHING_FLOOR_HEIGHT), (1448555207, 1, 4.6),
                                    (1448555203, 5, 3.61), (1448555206, 8, 3.46)):
-        building(visual, collision, polygons[ident], ident, floors, height)
-    entrance(visual, collision)
-    add_sports(visual, collision, polygons)
+        building(visual, polygons[ident], ident, floors, height)
+    entrance(visual)
+    add_sports(visual, polygons)
     target.mkdir(parents=True, exist_ok=True)
     count = visual.export(target / 'campus.glb')
-    colliders = collision.export(target / 'collision.glb')
-    manifest(target, polygons[1084438083][0])
-    print(f'Campus GLB: {count:,} triangles · collision: {colliders:,} triangles')
+    manifest(target, polygons)
+    print(f'Campus GLB: {count:,} triangles')
 
 
 if __name__ == '__main__':

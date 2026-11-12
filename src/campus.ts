@@ -1,4 +1,4 @@
-import { Box3, Group, Mesh, Object3D, Vector3 } from 'three';
+import { Box3, BufferAttribute, BufferGeometry, Group, Material, Mesh, Object3D, Vector3 } from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 
@@ -20,6 +20,7 @@ type CampusManifest = {
   description?: string;
   models: Model[];
   collisionUrl?: string;
+  collisionFromModels?: boolean;
   evidenceUrl?: string;
   landingBoundary?: PlanCoordinate[];
   spawn: CampusPoint;
@@ -46,17 +47,26 @@ function modelURL(file: string) {
   return url.href;
 }
 
-function collectMeshes(root: Object3D, target: Group, include: (mesh: Mesh) => boolean) {
+function collectMeshes(
+  root: Object3D,
+  target: Group,
+  geometryFor: (mesh: Mesh) => BufferGeometry | undefined,
+  visibleOnly = false,
+) {
   root.updateWorldMatrix(true, true);
-  root.traverse(object => {
-    if (!(object instanceof Mesh) || !include(object)) return;
+  const copyMesh = (object: Object3D) => {
+    if (!(object instanceof Mesh)) return;
+    const geometry = geometryFor(object);
+    if (!geometry) return;
     const copy = object.clone(false);
-    copy.name = object.name;
+    copy.geometry = geometry;
     copy.matrixAutoUpdate = false;
     copy.matrix.copy(object.matrixWorld);
     copy.visible = true;
     target.add(copy);
-  });
+  };
+  if (visibleOnly) root.traverseVisible(copyMesh);
+  else root.traverse(copyMesh);
 }
 
 function isCollisionNode(object: Object3D | null): boolean {
@@ -66,6 +76,27 @@ function isCollisionNode(object: Object3D | null): boolean {
     object = object.parent;
   }
   return false;
+}
+
+function structuralGeometry(mesh: Mesh) {
+  if (isCollisionNode(mesh)) return undefined;
+  const structural = (material: Material | undefined) => material && !material.name.startsWith('decal-');
+  const geometry = mesh.geometry;
+  if (!Array.isArray(mesh.material)) return structural(mesh.material) ? geometry : undefined;
+  const materials = mesh.material;
+  const groups = geometry.groups.filter(group => structural(materials[group.materialIndex ?? 0]));
+  if (!groups.length) return undefined;
+  if (groups.length === geometry.groups.length) return geometry;
+  const index = new Uint32Array(groups.reduce((count, group) => count + group.count, 0));
+  let offset = 0;
+  for (const group of groups) {
+    for (let i = group.start; i < group.start + group.count; i += 1) {
+      index[offset++] = geometry.index ? geometry.index.getX(i) : i;
+    }
+  }
+  return new BufferGeometry()
+    .setAttribute('position', geometry.getAttribute('position'))
+    .setIndex(new BufferAttribute(index, 1));
 }
 
 export async function loadCampus() {
@@ -79,6 +110,9 @@ export async function loadCampus() {
   }
   if (manifest.overview && (!validCoordinate(manifest.overview.position) || !validCoordinate(manifest.overview.target))) {
     throw new Error('校园总览机位无效。');
+  }
+  if (manifest.collisionFromModels !== undefined && typeof manifest.collisionFromModels !== 'boolean') {
+    throw new Error('校园碰撞来源无效。');
   }
   if (manifest.landingBoundary && (!Array.isArray(manifest.landingBoundary) || manifest.landingBoundary.length < 3
     || !manifest.landingBoundary.every(pair => Array.isArray(pair) && pair.length === 2 && pair.every(Number.isFinite)))) {
@@ -102,7 +136,8 @@ export async function loadCampus() {
   const collision = new Group();
   const [models, collisionAsset] = await Promise.all([
     Promise.all(manifest.models.map(model => loader.loadAsync(modelURL(model.url)))),
-    manifest.collisionUrl ? loader.loadAsync(modelURL(manifest.collisionUrl)) : undefined,
+    !manifest.collisionFromModels && manifest.collisionUrl
+      ? loader.loadAsync(modelURL(manifest.collisionUrl)) : undefined,
   ]);
   for (const [index, asset] of models.entries()) {
     const config = manifest.models[index];
@@ -114,10 +149,12 @@ export async function loadCampus() {
     visuals.add(wrapper);
   }
 
-  if (collisionAsset) {
-    collectMeshes(collisionAsset.scene, collision, mesh => mesh.userData.collision !== false);
+  if (manifest.collisionFromModels) {
+    collectMeshes(visuals, collision, structuralGeometry, true);
+  } else if (collisionAsset) {
+    collectMeshes(collisionAsset.scene, collision, mesh => mesh.userData.collision !== false ? mesh.geometry : undefined);
   } else {
-    collectMeshes(visuals, collision, isCollisionNode);
+    collectMeshes(visuals, collision, mesh => isCollisionNode(mesh) ? mesh.geometry : undefined);
   }
 
   const bounds = new Box3();

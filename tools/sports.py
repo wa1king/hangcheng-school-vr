@@ -224,7 +224,7 @@ def winter_turf():
     return buffer.getvalue(), 'image/jpeg'
 
 
-def west_stands(mesh, collision, campus):
+def west_stands(mesh, campus):
     # The 2018 photograph shows the tiers and canopy. The long roof and the
     # exposed platforms at both ends are also visible in the 2026 aerial view.
     north, south = (-88.8, -75.4), (-113.6, -39.2)
@@ -236,27 +236,24 @@ def west_stands(mesh, collision, campus):
     def at(u, v):
         return center_x + u * dx + v * dz, center_z + u * dz - v * dx
 
-    def block(material, u, v, y, length, height, depth, solid=False):
+    def block(material, u, v, y, length, height, depth):
         x, z = at(u, v)
         mesh.box(material, x, y, z, length, height, depth, angle)
-        if solid:
-            collision.box('collider', x, y, z, length, height, depth, angle)
 
     deck = Polygon([at(-span / 2, -2.20), at(-span / 2, 3.00),
                     at(span / 2, 3.00), at(span / 2, -2.20)]).intersection(campus)
     slab(mesh, deck, -0.03, 0.12, 'stand_paving')
-    slab(collision, deck, -0.03, 0.12, 'collider')
     for row in range(4):
         height = 0.28 + row * 0.29
         front = 1.51 - row * 0.78
         rear = -2.18
-        block('stand_concrete', 0, (front + rear) / 2, 0.12, 32.5, height, front - rear, solid=True)
+        block('stand_concrete', 0, (front + rear) / 2, 0.12, 32.5, height, front - rear)
         block('stand_edge', 0, front - 0.02, height + 0.089, 32.5, 0.047, 0.053)
     for sign in (-1, 1):
         for index in range(7):
             height = (index + 1) * 0.165
             u = sign * (18.85 - index * 0.36)
-            block('stand_concrete', u, -0.87, 0.12, 0.36, height, 2.4, solid=True)
+            block('stand_concrete', u, -0.87, 0.12, 0.36, height, 2.4)
         for u in (sign * 16.2, sign * 19.1):
             block('stand_steel', u, -2.12, 0.22, 0.067, 1.38, 0.067)
         start, end = at(sign * 16.2, -2.12), at(sign * 19.1, -2.12)
@@ -265,7 +262,7 @@ def west_stands(mesh, collision, campus):
     # Thin, shallow-sloped roof on light columns. The front faces the track.
     for u in (-10.2, -6.1, -2.0, 2.1, 6.2, 10.3):
         for v in (-1.92, 1.35):
-            block('stand_steel', u, v, 0.13 if v > 0 else 1.26, 0.10, 3.58 if v > 0 else 2.68, 0.10, solid=True)
+            block('stand_steel', u, v, 0.13 if v > 0 else 1.26, 0.10, 3.58 if v > 0 else 2.68, 0.10)
         a, b = at(u, -2.39), at(u, 2.76)
         mesh.strip('stand_steel', a, b, 0.087, 3.67, 0.105)
     roof_a, roof_b = at(-11.95, -2.64), at(-11.95, 2.71)
@@ -275,14 +272,13 @@ def west_stands(mesh, collision, campus):
     mesh.face('stand_steel', [(x, y - 0.087, z) for x, y, z in reversed(roof)])
     for (x, y, z), (xx, yy, zz) in loop_edges(roof):
         mesh.face('stand_edge', [(x, y - 0.087, z), (xx, yy - 0.087, zz), (xx, yy, zz), (x, y, z)])
-    collision.face('collider', roof)
     for u in range(-11, 12):
         a, b = at(u, -2.62), at(u, 2.69)
-        mesh.face('stand_edge', [(a[0], 4.043, a[1]), (a[0] + dx * 0.038, 4.043, a[1] + dz * 0.038),
-                                 (b[0] + dx * 0.038, 3.803, b[1] + dz * 0.038), (b[0], 3.803, b[1])])
+        mesh.face('stand_roof_seam', [(a[0], 4.043, a[1]), (a[0] + dx * 0.038, 4.043, a[1] + dz * 0.038),
+                                      (b[0] + dx * 0.038, 3.803, b[1] + dz * 0.038), (b[0], 3.803, b[1])])
 
 
-def trackside(mesh, collision, features):
+def trackside(mesh, features):
     for name, color, grout, seed in (
         ('stand_paving', (181, 174, 153), (166, 159, 141), 34),
         ('stand_concrete', (189, 185, 169), (174, 169, 153), 17),
@@ -294,8 +290,9 @@ def trackside(mesh, collision, features):
         ('sports_lamp', (82, 88, 86)),
     ):
         mesh.material(name, color)
+    mesh.material('stand_roof_seam', (114, 123, 113), solid=False)
     campus = Polygon(features[1084438083][0])
-    west_stands(mesh, collision, campus)
+    west_stands(mesh, campus)
     track = Polygon(features[TRACK_ID][0])
     courts = unary_union([Polygon(features[ident][0]) for ident in BASKETBALL_IDS[-2:]])
     apron = courts.buffer(1.62, join_style='mitre').difference(courts).intersection(campus)
@@ -320,7 +317,6 @@ def trackside(mesh, collision, features):
     a, b = (-61.1, 15.7), (-31.7, -32.6)
     edge = LineString([a, b]).buffer(0.14, cap_style='flat').intersection(campus).difference(track)
     slab(mesh, edge, -0.01, 0.19, 'sports_border')
-    slab(collision, edge, 0.0, 0.19, 'collider')
     for x, z in ((-124.7, 36.9), (-83.2, 32.6), (-43.5, -42.0), (58.7, -64.2)):
         if not campus.covers(Point(x, z)) or track.covers(Point(x, z)):
             continue
@@ -330,7 +326,7 @@ def trackside(mesh, collision, features):
             mesh.box('sports_lamp', x + offset, 6.01, z, 0.32, 0.22, 0.21)
 
 
-def add_sports(visual, collision, features):
+def add_sports(visual, features):
     """Append sports meshes using OSM-id-keyed polygon rings in campus (x,z) meters."""
     rubber = grain_texture(20260125, 9)
     for name, color, texture in (
@@ -339,16 +335,16 @@ def add_sports(visual, collision, features):
         ('sports_court_blue', (65, 90, 143), rubber), ('sports_court_key', (65, 112, 103), rubber),
         ('sports_court_green', (106, 133, 113), rubber),
     ):
-        visual.material(name, color, texture=texture)
+        visual.material(name, color, texture=texture, solid=name != 'sports_court_key')
     for name, color in (
         ('sports_paint', (225, 219, 195)),
         ('sports_posts', (213, 218, 204)), ('sports_hoop_support', (47, 113, 92)),
         ('sports_board', (214, 217, 195)), ('sports_rim', (160, 68, 45)),
     ):
-        visual.material(name, color)
+        visual.material(name, color, solid=name != 'sports_paint')
     visual.material('sports_net', (203, 205, 187), double=True)
     add_track(visual, features[TRACK_ID], features[FOOTBALL_ID][0])
     add_football(visual, features[FOOTBALL_ID][0])
     for feature_id in BASKETBALL_IDS:
         add_basketball(visual, features[feature_id][0], feature_id in BLUE_COURTS)
-    trackside(visual, collision, features)
+    trackside(visual, features)

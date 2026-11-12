@@ -4,7 +4,7 @@
 
 选择淘气或笑笑，用跟随视角步行。切到飞行后，角色戴上竹蜻蜓，键盘按 E 上升、Q 下降，触屏使用右侧升降按钮。游览中可以切换第一人称或跳转到指定地点。两位角色使用为本项目制作的卡通模型。
 
-从「前往」菜单选择教学楼室内示意区，可以步行穿过走廊、上下楼梯、进教室。室内陈设参考公开课堂照片，楼梯、走廊和教室布局是示意设计。
+从「前往」选择主教学翼、西侧活动楼、北侧教学楼或东南综合楼的入口，可以步行进楼、穿过走廊并沿楼梯到屋顶。楼内平面与主楼连廊是游览示意，教室陈设参考公开课堂照片。
 
 [打开校园漫游](https://wa1king.github.io/hangcheng-school-vr/) · [查看资料来源](https://wa1king.github.io/hangcheng-school-vr/scene/sources.html)
 
@@ -12,7 +12,7 @@
 
 需要 Node.js 22.14 或以上。运行 `npm ci`，再运行 `npm run dev`。`npm run build` 生成 `dist`。GitHub Pages 从 `main` 分支的 `docs` 目录发布。
 
-`tools/build_campus.py` 用开放地图数据生成场景模型。重新生成时需要 Python 3.11 或以上、NumPy、Pillow、Shapely、Mapbox Earcut 和 Windows 字体。发布模型使用 Meshopt 压缩。重新生成后可用 `npx gltfpack@1.3.0 -i public/scene/campus.glb -o public/scene/campus.packed.glb -cc -noq -kn -km -ke` 生成压缩版，再用压缩版替换 `campus.glb`。碰撞文件 `collision.glb` 使用相同参数压缩。构建后将 `dist` 内容更新到 `docs` 并保留 `.nojekyll`。
+`tools/build_campus.py` 用开放地图数据生成场景模型。重新生成时需要 Python 3.11 或以上、NumPy、Pillow、Shapely、Mapbox Earcut 和 Windows 字体。使用 `npx gltfpack@1.3.0 -i public/scene/campus.glb -o public/scene/campus.packed.glb -cc -vpf -vp 16 -vt 16 -vn 10 -kn -km -ke` 压缩后，用压缩版替换 `campus.glb`。渲染和碰撞读取这份模型，标线和标牌等表面装饰不参与碰撞。构建后将 `dist` 内容更新到 `docs` 并保留 `.nojekyll`。
 
 ## 数据与署名
 

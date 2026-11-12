@@ -18,8 +18,17 @@ def tile(color, seed, grout=None, pattern='grain'):
     rng = np.random.default_rng(seed)
     large = Image.fromarray(rng.integers(95, 161, (16, 16), dtype=np.uint8)).resize((256, 256), Image.Resampling.BICUBIC)
     cloud = (np.asarray(large, dtype=float) - 128)[:, :, None]
-    variation = 0.17 if pattern == 'paving' else 0.30
-    pixels = np.array(color) + cloud * variation + rng.normal(0, 2.8, (256, 256, 1))
+    variation = {'paving': 0.16, 'brick': 0.15}.get(pattern, 0.24)
+    pixels = np.array(color) + cloud * variation + rng.normal(0, 1.8, (256, 256, 1))
+    if pattern == 'brick':
+        for y in range(0, 256, 8):
+            for x in range(-8 if y // 8 % 2 else 0, 256, 16):
+                columns = np.arange(x + 1, x + 16) % 256
+                pixels[y + 1:y + 8, columns] += rng.normal(0, 3.1) * np.array([1, .87, .72])
+    if pattern == 'paving':
+        for y in range(0, 256, 64):
+            for x in range(0, 256, 64):
+                pixels[y:y+64, x:x+64] += rng.normal(0, 2.9)
     image = Image.fromarray(np.uint8(np.clip(pixels, 0, 255)))
     draw = ImageDraw.Draw(image)
     if pattern == 'brick':
@@ -42,15 +51,31 @@ def png(image):
     return stream.getvalue(), 'image/png'
 
 
-def masonry_normal():
+def surface_maps(pattern, seed):
     row, column = np.indices((256, 256))
-    joint = (row % 8 == 0) | ((column - (row // 8 % 2) * 8) % 16 == 0)
-    relief = np.where(joint, 0.0, 1.0)
-    dx = (np.roll(relief, 1, axis=1) - np.roll(relief, -1, axis=1)) * 0.42
-    dy = (np.roll(relief, -1, axis=0) - np.roll(relief, 1, axis=0)) * 0.42
+    rng = np.random.default_rng(seed)
+    grain = rng.normal(0, .06, row.shape)
+    if pattern == 'brick':
+        joint = (row % 8 == 0) | ((column - (row // 8 % 2) * 8) % 16 == 0)
+    elif pattern == 'paving':
+        joint = (row % 64 <= 1) | (column % 64 <= 1)
+    else:
+        joint = np.zeros(row.shape, dtype=bool)
+    relief = np.where(joint, -.80, 0.0) + grain
+    dx = (np.roll(relief, 1, axis=1) - np.roll(relief, -1, axis=1)) * .58
+    dy = (np.roll(relief, -1, axis=0) - np.roll(relief, 1, axis=0)) * .58
     vectors = np.stack((dx, dy, np.ones_like(dx)), axis=-1)
     vectors /= np.linalg.norm(vectors, axis=-1, keepdims=True)
-    return png(Image.fromarray(np.round((vectors * 0.5 + 0.5) * 255).astype(np.uint8)))
+    normal = np.round((vectors * .5 + .5) * 255).astype(np.uint8)
+    roughness = np.ones((*row.shape, 3), dtype=np.uint8) * 255
+    roughness[..., 1] = np.clip(215 + 86 * grain + 23 * joint, 190, 250).astype(np.uint8)
+
+    def encode(pixels):
+        stream = BytesIO()
+        Image.fromarray(pixels).save(stream, 'JPEG', quality=87, subsampling=0, optimize=True)
+        return stream.getvalue(), 'image/jpeg'
+
+    return encode(normal), encode(roughness)
 
 
 def clock_texture():
@@ -86,9 +111,10 @@ def window_reflection(color):
     pixels = image.load()
     for y in range(128):
         for x in range(96):
-            reflected_sky = 0.78 + 0.37 * (1 - y / 127)
-            glint = max(0, 1 - abs(x / 96 + y / 210 - 0.49) * 9) * 0.085
-            pixels[x, y] = tuple(round(min(255, channel * (reflected_sky + glint))) for channel in color)
+            height = y / 127
+            sky = 1.25 - .55 * height + .09 * math.exp(-((height - .68) / .12) ** 2)
+            glint = max(0, 1 - abs(x / 96 + y / 220 - .56) * 7) * .062
+            pixels[x, y] = tuple(round(min(255, channel * (sky + glint))) for channel in color)
     stream = BytesIO()
     image.save(stream, 'JPEG', quality=91, optimize=True)
     return stream.getvalue(), 'image/jpeg'
@@ -111,10 +137,13 @@ def materials(mesh):
         'walk': tile((168, 159, 148), 11, (158, 149, 139), 'paving'),
         'planter': tile((110, 133, 68), 3),
     }
-    brick_normal = masonry_normal()
+    brick_maps = surface_maps('brick', 17)
+    paving_maps = surface_maps('paving', 25)
+    grain_maps = surface_maps('grain', 32)
     for name, texture in textures.items():
-        mesh.material(name, (255, 255, 255), texture=texture,
-                      normal=brick_normal if name in ('beige', 'terra') else None)
+        maps = brick_maps if name in ('beige', 'terra') else (
+            paving_maps if name in ('roof', 'roof-path', 'plaza', 'walk') else grain_maps)
+        mesh.material(name, (255, 255, 255), texture=texture, normal=maps[0], roughness_map=maps[1])
     for name, rgb, roughness in (
         ('cream', (210, 199, 175), 0.84), ('soffit', (166, 156, 135), 0.9),
         ('reveal', (177, 167, 149), 0.86), ('sill', (203, 198, 184), 0.74),
@@ -126,12 +155,13 @@ def materials(mesh):
         ('leaf1', (70, 106, 56), 0.87), ('leaf2', (91, 125, 58), 0.87),
         ('leaf3', (103, 135, 68), 0.87), ('hedge', (113, 138, 59), 0.9),
     ):
-        mesh.material(name, rgb, roughness, double=(name == 'blue-rail'))
+        mesh.material(name, rgb, roughness, double=(name == 'blue-rail'),
+                      solid=name not in ('brickline', 'paint-yellow'))
     for name, color in (('glass-dusk', (57, 79, 92)), ('glass-light', (87, 110, 124)),
                         ('glass-deep', (41, 57, 66)), ('glass-ribbon', (130, 148, 157))):
         mesh.material(name, (255, 255, 255), 0.25, texture=window_reflection(color))
-    mesh.material('clock-face', (255, 255, 255), 0.71, texture=clock_texture())
-    mesh.material('school-name', (255, 255, 255), 0.63, texture=school_sign())
+    mesh.material('clock-face', (255, 255, 255), 0.71, texture=clock_texture(), solid=False)
+    mesh.material('school-name', (255, 255, 255), 0.63, texture=school_sign(), solid=False)
 
 
 def slab(mesh, polygon, low, high, side, top=None, bottom=None):
@@ -259,13 +289,12 @@ def ribbon_windows(mesh, a, b, floor, floor_height=3.46):
     window_opening(mesh, left, right, floor + low, floor + high, 0.22, 'glass-ribbon', max(1, round(length / 0.72)))
 
 
-def corridor_rail(mesh, collision, a, b, y):
+def corridor_rail(mesh, a, b, y):
     outside_a, outside_b = position(a, b, 0, 0.065), position(a, b, 1, 0.065)
     mesh.strip('beige', outside_a, outside_b, 0.14, y - 0.25, 0.51)
     mesh.strip('sill', outside_a, outside_b, 0.18, y + 0.26, 0.046)
     rail_a, rail_b = position(a, b, 0, 0.16), position(a, b, 1, 0.16)
     mesh.strip('blue-cap', rail_a, rail_b, 0.052, y + 0.994, 0.046)
-    collision.strip('collider', rail_a, rail_b, 0.10, y, 1.04)
     length = math.dist(a, b)
     spacing = max(1, round(length / 0.17))
     for index in range(1, spacing):
@@ -314,7 +343,7 @@ def facade_recess(edges, depth):
     ])
 
 
-def gallery_columns(mesh, collision, a, b, y, floor_height, back_depth, arcade=False):
+def gallery_columns(mesh, a, b, y, floor_height, back_depth, arcade=False):
     length = math.dist(a, b)
     x_mid, z_mid = position(a, b, 0.5)
     curved_pier = (-5.8 < x_mid < -4.7 and 69 < z_mid < 71) or (28.6 < x_mid < 29.1 and 57 < z_mid < 59)
@@ -329,39 +358,42 @@ def gallery_columns(mesh, collision, a, b, y, floor_height, back_depth, arcade=F
         x, z = position(a, b, t, inset)
         height = floor_height - 0.27
         mesh.box('terra' if arcade else 'beige', x, y, z, width, height, depth, angle)
-        collision.box('collider', x, y, z, width, height, depth, angle)
         # Short cross-beams reveal the depth of the covered walk behind the pier.
         mesh.strip('soffit', (x, z), position(a, b, t, back_depth), 0.39, y + height - 0.20, 0.20)
 
 
-def ground_arcade(mesh, collision, a, b, floor_height):
+def ground_arcade(mesh, a, b, floor_height):
     beam_a, beam_b = position(a, b, 0, 0.32), position(a, b, 1, 0.32)
     mesh.strip('beige', beam_a, beam_b, 0.63, floor_height - 0.50, 0.25)
-    gallery_columns(mesh, collision, a, b, 0, floor_height, 3.24, arcade=True)
+    gallery_columns(mesh, a, b, 0, floor_height, 3.24, arcade=True)
 
 
 def foliage(mesh, x, z, height, seed, y=0):
     rng = random.Random(seed)
     crown = height * rng.uniform(0.39, 0.53)
     mesh.cylinder('trunk', x, y, z, height * 0.025, height * 0.76, 7)
-    for cluster in range(8):
-        angle = cluster * math.tau / 7 + rng.uniform(-0.15, 0.15)
-        offset = 0 if cluster == 7 else crown * rng.uniform(0.36, 0.72)
+    sides, clusters = 7, 7
+    for cluster in range(clusters):
+        angle = cluster * math.tau / (clusters - 1) + rng.uniform(-0.15, 0.15)
+        central = cluster == clusters - 1
+        offset = 0 if central else crown * rng.uniform(0.36, 0.72)
         cx, cz = x + offset * math.cos(angle), z + offset * math.sin(angle)
-        cy = y + height * (0.71 if cluster == 7 else rng.uniform(0.52, 0.72))
+        cy = y + height * (0.71 if central else rng.uniform(0.52, 0.72))
         radius = crown * rng.uniform(0.42, 0.77)
         levels = []
         for h, scale in ((-0.53, 0.36), (-0.22, 0.8), (0.13, 1.0), (0.51, 0.69), (0.82, 0.17)):
-            levels.append([(cx + radius * scale * rng.uniform(0.82, 1.14) * math.cos(i * math.tau / 8), cy + radius * h,
-                            cz + radius * scale * rng.uniform(0.82, 1.14) * math.sin(i * math.tau / 8)) for i in range(8)])
+            levels.append([(cx + radius * scale * rng.uniform(0.87, 1.12) * math.cos(i * math.tau / sides), cy + radius * h,
+                            cz + radius * scale * rng.uniform(0.87, 1.12) * math.sin(i * math.tau / sides)) for i in range(sides)])
         for level, (lower, upper) in enumerate(zip(levels, levels[1:])):
-            for i in range(8):
-                j = (i + 1) % 8
-                mesh.face(f'leaf{rng.choices(range(4), weights=(4-level, 4, 2+level, level+1))[0]}', (lower[i], upper[i], upper[j], lower[j]))
+            for i in range(sides):
+                j = (i + 1) % sides
+                points = (lower[i], upper[i], upper[j], lower[j])
+                mesh.face(f'leaf{rng.choices(range(4), weights=(4-level, 4, 2+level, level+1))[0]}', points,
+                          normals=[(px-cx, (py-cy)*.80, pz-cz) for px, py, pz in points])
         mesh.face('leaf3', list(reversed(levels[-1])))
 
 
-def roof_terraces(mesh, polygon, ident, height):
+def roof_terraces(mesh, polygon, ident, height, clear=None):
     # The newer overhead image shows paved terraces between the planting beds.
     # These approximate planting locations sit inside the mapped roof outlines.
     y = height + 0.054
@@ -398,6 +430,8 @@ def roof_terraces(mesh, polygon, ident, height):
         beds = [([(-42, 14), (-35, 14.4), (-30, 13.7), (-23, 15)], 2.0)]
 
     setback = polygon.buffer(-0.72, join_style='mitre')
+    if clear is not None:
+        setback = setback.difference(clear)
     for bounds in hardscape:
         slab(mesh, setback.intersection(box(*bounds)), y + 0.021, y + 0.021, 'roof-weathered')
 
@@ -417,23 +451,25 @@ def roof_terraces(mesh, polygon, ident, height):
                 foliage(mesh, x, z, rng.uniform(0.8, 1.92), rng.randrange(100000), y + 0.114)
 
 
-def northern_hall(mesh, collision, polygon, lower_roof, roof_top):
+def northern_hall(mesh, polygon, lower_roof, roof_top):
     # A separate higher volume is supported by the northern shadow observations.
     slab(mesh, polygon, lower_roof, roof_top, 'beige', 'roof-weathered')
-    slab(collision, polygon, lower_roof, roof_top, 'collider')
+    parapet = polygon.difference(polygon.buffer(-0.16, join_style='mitre'))
+    parapet = parapet.difference(box(29.34, -18.25, 31.60, -17.70))
+    slab(mesh, parapet, roof_top, roof_top + .52, 'beige', 'cream')
     parts = [polygon] if polygon.geom_type == 'Polygon' else polygon.geoms
     for part in parts:
         corners = list(orient(part, sign=1).exterior.coords)
         for edge, (a, b) in enumerate(zip(corners, corners[1:])):
             length = math.dist(a, b)
-            line_rect(mesh, 'beige', a, b, roof_top - 0.06, 0.51)
-            line_rect(mesh, 'cream', a, b, roof_top + 0.40, 0.11, -0.016)
             if length >= 5.5:
                 line_rect(mesh, 'cream', a, b, lower_roof + 0.24, 0.27, -0.016)
                 panels(mesh, a, b, lower_roof + 1.55, max(2, round(length / 2.75)), -0.016, 'windows', 713 + edge)
 
 
-def building(mesh, collision, footprint, ident, floors, floor_height):
+def building(mesh, footprint, ident, floors, floor_height):
+    from access import build_access, build_upper_roof_stair, building_access
+    from connectors import CONNECTOR_AREA, build_connectors
     from interiors import STAIR_VOID, WING_AREA, add_teaching_wing, courtyard_edge, facade_spans, interior_materials
 
     poly = orient(Polygon(footprint[0], footprint[1:]).buffer(0), sign=1)
@@ -448,60 +484,66 @@ def building(mesh, collision, footprint, ident, floors, floor_height):
             arcade = main_building and not ring_no and (mode == 'corridor' or entrance_wing(a, b))
             facades.append((ring_no, a, b, mode, arcade))
 
+    access = building_access(ident, [(a, b) for _, a, b, _, _ in facades])
+    interior = WING_AREA if main_building else access.area
+    upper_interior = interior.union(CONNECTOR_AREA) if main_building else interior
+    stair_void = STAIR_VOID if main_building else access.stair_void
+    indoor_floor = poly.intersection(interior)
+    if not poly.buffer(.20).covers(stair_void):
+        raise ValueError(f'Stairwell outside the footprint for {ident}')
+    core = core.difference(interior)
     gallery_depth = 3.02 if main_building else 2.43
     gallery_recess = facade_recess([(a, b) for _, a, b, mode, _ in facades if mode == 'corridor'], gallery_depth)
-    upper_core = core.difference(gallery_recess)
-    gallery_floor = poly.intersection(gallery_recess)
+    upper_core = core.difference(gallery_recess.union(upper_interior))
     if main_building:
-        interior_materials(mesh, tile)
+        interior_materials(mesh, tile, floors)
         entry_opening = box(-0.45, 25.2, 22.05, 37.8)
-        wing_top = floor_height * 2
         arcade_recess = facade_recess([(a, b) for _, a, b, _, arcade in facades if arcade], 3.24)
         core_sections = (
-            (core.difference(entry_opening.union(WING_AREA).union(arcade_recess)), 0, floor_height),
-            (upper_core.difference(entry_opening.union(WING_AREA)), floor_height, 4.8),
-            (upper_core.difference(WING_AREA), 4.8, wing_top),
-            (upper_core, wing_top, total),
+            (core.difference(entry_opening.union(arcade_recess)), 0, floor_height),
+            (upper_core.difference(entry_opening), floor_height, 4.8),
+            (upper_core, 4.8, total),
         )
-        slab(mesh, poly.intersection(WING_AREA), 0.012, 0.012, 'teaching-floor')
     elif not gallery_recess.is_empty:
         core_sections = ((core, 0, floor_height), (upper_core, floor_height, total))
     else:
         core_sections = ((core, 0, total),)
     for section, low, high in core_sections:
         slab(mesh, section, low, high, 'beige')
-        slab(collision, section, low, high, 'collider')
+    slab(mesh, indoor_floor, 0.012, 0.012, 'teaching-floor')
     for floor in range(1, floors):
         y = floor * floor_height
-        slab(collision, gallery_floor, y - 0.28, y, 'collider')
-        if main_building and floor <= 2:
-            indoor_floor = poly.intersection(WING_AREA)
-            if floor == 1:
-                indoor_floor = indoor_floor.difference(STAIR_VOID)
-                slab(collision, indoor_floor, y - 0.28, y, 'collider', 'walkable')
-            slab(mesh, poly.difference(WING_AREA), y - 0.28, y, 'beige', 'roof', 'soffit')
-            slab(mesh, indoor_floor, y - 0.28, y, 'beige', 'teaching-floor', 'teaching-ceiling')
-        else:
-            slab(mesh, poly, y - 0.28, y, 'beige', 'roof', 'soffit')
-    slab(mesh, poly, total - 0.55, total + 0.05, 'beige', 'roof', 'soffit')
+        slab(mesh, poly.difference(upper_interior), y - 0.28, y, 'beige', 'roof', 'soffit')
+        slab(mesh, poly.intersection(upper_interior).difference(stair_void),
+             y - 0.28, y, 'beige', 'teaching-floor', 'teaching-ceiling')
+    roof = poly.difference(stair_void)
+    slab(mesh, roof, total - 0.55, total + 0.05, 'beige', 'roof', 'soffit')
+    parapet = poly.difference(poly.buffer(-0.18, join_style='mitre'))
+    slab(mesh, parapet, total + 0.05, total + 0.84, 'beige', 'cream')
 
     if main_building:
         upper = poly.intersection(box(-30, -43, 79, -17.9))
         north_roof = 22.0
-        northern_hall(mesh, collision, upper, total + 0.045, north_roof)
+        northern_hall(mesh, upper, total + 0.045, north_roof)
         roof_terraces(mesh, upper, ident, north_roof - 0.054)
-        roof_terraces(mesh, poly.difference(upper), ident, total)
+        clear = stair_void.buffer(1.5).union(box(27.0, -19.0, 32.8, 3.2))
+        roof_terraces(mesh, poly.difference(upper), ident, total, clear)
+        build_upper_roof_stair(mesh, total + .05, north_roof)
+        build_connectors(mesh, floors, floor_height)
     else:
-        roof_terraces(mesh, poly, ident, total)
+        clear = stair_void.buffer(1.65).union(access.polygon(2.35, .50, 4.75, 3.6))
+        roof_terraces(mesh, poly, ident, total, clear)
+        build_access(mesh, access, floors, floor_height)
 
     for k, (ring_no, a, b, mode, arcade) in enumerate(facades):
         length = math.dist(a, b)
         middle_x, middle_z = position(a, b, 0.5)
-        fascia = 1.36 if mode == 'corridor' and main_building else 0.89
-        line_rect(mesh, 'beige', a, b, total + 0.81 - fascia, fascia)
-        line_rect(mesh, 'cream', a, b, total + 0.72, 0.12, -0.014)
+        access_front = access is not None and access.edge == (a, b)
+        if access_front:
+            draw_access_front(mesh, a, b, floor_height, mode, ident)
         if mode == 'ribbon':
-            line_rect(mesh, 'beige', a, b, 0, floor_height, 0.12)
+            if not access_front:
+                line_rect(mesh, 'beige', a, b, 0, floor_height, 0.12)
             for floor in range(1, floors):
                 ribbon_windows(mesh, a, b, floor * floor_height, floor_height)
             continue
@@ -509,15 +551,17 @@ def building(mesh, collision, footprint, ident, floors, floor_height):
         over_entry = main_building and -2.6 < middle_x < 25.6 and 25.1 < middle_z < 36.8 and length > 18
         opens_to_wing = main_building and ring_no and courtyard_edge(a, b)
         if opens_to_wing:
-            add_teaching_wing(mesh, collision, (a, b), floor_height)
+            add_teaching_wing(mesh, (a, b), floor_height, floors)
         spans = facade_spans(a, b) if opens_to_wing else [(a, b, False)]
         for start, stop, indoor in spans:
             span = math.dist(start, stop)
-            for floor in range(2 if indoor else 0, floors):
+            if indoor:
+                continue
+            for floor in range(floors):
                 if floor == 0 and arcade:
-                    ground_arcade(mesh, collision, start, stop, floor_height)
+                    ground_arcade(mesh, start, stop, floor_height)
                     continue
-                if floor == 0 and over_entry:
+                if floor == 0 and (over_entry or access_front):
                     continue
                 y = floor * floor_height
                 visible_mode = 'classroom' if floor == 0 and mode in ('fins', 'corridor') else mode
@@ -531,11 +575,22 @@ def building(mesh, collision, footprint, ident, floors, floor_height):
                 else:
                     line_rect(mesh, 'beige', start, stop, y, floor_height - 0.04, 0.12)
                 if visible_mode == 'corridor':
-                    corridor_rail(mesh, collision, start, stop, y)
-                    gallery_columns(mesh, collision, start, stop, y, floor_height, gallery_depth)
+                    corridor_rail(mesh, start, stop, y)
+                    gallery_columns(mesh, start, stop, y, floor_height, gallery_depth)
 
 
-def clock_tower(mesh, collision, x, z):
+def draw_access_front(mesh, a, b, height, mode, seed):
+    length = math.dist(a, b)
+    left, right = position(a, b, .5 - 1.22/length), position(a, b, .5 + 1.22/length)
+    for start, stop in ((a, left), (right, b)):
+        count = max(1, round(math.dist(start, stop) / 4.3))
+        panels(mesh, start, stop, 0, count, .12, 'terracotta' if mode == 'terracotta' else 'classroom', seed, height)
+    line_rect(mesh, 'beige', left, right, 2.64, height - 2.64)
+    for end in (left, right):
+        mesh.box('beige', end[0], 0, end[1], .20, 2.64, .26)
+
+
+def clock_tower(mesh, x, z):
     # Rounded cap, twin dials and open band below the clock are visible in the photos.
     mesh.prism('terra', rounded(x, z, 3.4, 2.85, 0.20), 0, 18.85)
     for offset in (-1.16, 1.16):
@@ -548,7 +603,6 @@ def clock_tower(mesh, collision, x, z):
         mesh.face('terra', [(x, 22.91, z - 1.42), (b[0], b[1], z - 1.42), (a[0], a[1], z - 1.42)])
         mesh.face('terra', [(a[0], a[1], z + 1.42), (a[0], a[1], z - 1.42),
                             (b[0], b[1], z - 1.42), (b[0], b[1], z + 1.42)])
-    collision.box('collider', x, 0, z, 3.45, 24, 2.85)
     line_rect(mesh, 'clock-face', (x + 1.05, z + 1.45), (x - 1.05, z + 1.45), 20.57, 2.10, uv=OUTWARD_UV)
     line_rect(mesh, 'clock-face', (x - 1.73, z + 1.03), (x - 1.73, z - 1.03), 20.57, 2.10, uv=OUTWARD_UV)
     line_rect(mesh, 'glass-deep', (x + 0.56, z + 1.439), (x + 0.20, z + 1.439), 2.1, 15.9, uv=OUTWARD_UV)
@@ -556,9 +610,9 @@ def clock_tower(mesh, collision, x, z):
         line_rect(mesh, 'frame', (x + 0.56, z + 1.446), (x + 0.20, z + 1.446), h, 0.08)
 
 
-def entrance(mesh, collision):
+def entrance(mesh):
     # Placement is inferred from the 2018 gate photograph and 2023 design image.
-    clock_tower(mesh, collision, 31.2, 57.9)
+    clock_tower(mesh, 31.2, 57.9)
 
     # Raised entry and a recessed glazed passage based on the photographed facade.
     facade_x, facade_z = 10.8, 37.0
@@ -584,14 +638,11 @@ def entrance(mesh, collision):
     line_rect(mesh, 'school-name', (15.15, 37.56), (6.45, 37.56), 17.37, 2.02, uv=OUTWARD_UV)
     for cx in (1.1, 6.2, 15.35, 20.5):
         mesh.box('cream', cx, 0, 37.8, 0.77, 4.84, 0.78)
-        collision.box('collider', cx, 0, 37.8, 0.77, 4.84, 0.78)
     for step in range(8):
         start_z = 53.6 - step * 0.42
         finish_z = start_z - 0.42 if step < 7 else 40.3
         top = (step + 1) * 0.145
         mesh.box('plaza', 10.75, 0, (start_z + finish_z) / 2, 17.1, top, start_z - finish_z)
-        collision.box('collider', 10.75, 0, (start_z + finish_z) / 2, 17.1, top, start_z - finish_z)
         mesh.strip('reveal', (2.24, start_z - 0.042), (19.26, start_z - 0.042), 0.044, top + 0.002)
-    for target, mat in ((mesh, 'plaza'), (collision, 'collider')):
-        target.box(mat, 10.75, 0, 35.9, 17.1, 1.16, 8.8)
-        target.face(mat, [(2.2, 0, 24.2), (2.2, 1.16, 31.5), (19.3, 1.16, 31.5), (19.3, 0, 24.2)])
+    mesh.box('plaza', 10.75, 0, 35.9, 17.1, 1.16, 8.8)
+    mesh.face('plaza', [(2.2, -0.03, 24.2), (2.2, 1.16, 31.5), (19.3, 1.16, 31.5), (19.3, -0.03, 24.2)])

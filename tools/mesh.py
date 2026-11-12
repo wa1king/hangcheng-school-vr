@@ -55,10 +55,11 @@ class Mesh:
         self.materials = {}
         self.transform = transform
 
-    def material(self, name, rgb, roughness=0.85, metallic=0.0, texture=None, double=False, normal=None):
-        self.materials[name] = (rgb, roughness, metallic, texture, double, normal)
+    def material(self, name, rgb, roughness=0.85, metallic=0.0, texture=None, double=False,
+                 normal=None, solid=True, roughness_map=None):
+        self.materials[name] = (rgb, roughness, metallic, texture, double, normal, solid, roughness_map)
 
-    def face(self, mat, vertices, triangles=None, uv=None):
+    def face(self, mat, vertices, triangles=None, uv=None, normals=None):
         points = [self.transform(*p) for p in vertices]
         p, q, r = points[:3]
         a = [q[i] - p[i] for i in range(3)]
@@ -70,9 +71,14 @@ class Mesh:
         n = tuple(d / length for d in n)
         pos, normal, coords, indices = self.batches[mat]
         start = len(pos) // 3
-        for point in points:
+        for index, point in enumerate(points):
             pos.extend(point)
-            normal.extend(n)
+            if normals is None:
+                normal.extend(n)
+            else:
+                tip = self.transform(*(a + b for a, b in zip(vertices[index], normals[index])))
+                delta = [a - b for a, b in zip(tip, point)]
+                normal.extend(component / math.hypot(*delta) for component in delta)
         if uv is None:
             major = max(range(3), key=lambda i: abs(n[i]))
             u, v = ((2, 1), (0, 2), (0, 1))[major]
@@ -169,9 +175,9 @@ class Mesh:
         for name, (pos, norms, uv, inds) in self.batches.items():
             if not inds:
                 continue
-            rgb, rough, metal, texture, double, normal = self.materials[name]
+            rgb, rough, metal, texture, double, normal, solid, roughness_map = self.materials[name]
             pbr = {'baseColorFactor': [*(srgb(v) for v in rgb), 1], 'roughnessFactor': rough, 'metallicFactor': metal}
-            material = {'name': name, 'doubleSided': double, 'pbrMetallicRoughness': pbr}
+            material = {'name': name if solid else f'decal-{name}', 'doubleSided': double, 'pbrMetallicRoughness': pbr}
             if texture:
                 pbr['baseColorTexture'] = {'index': add_texture(texture)}
                 if texture[1] == 'image/png':
@@ -179,6 +185,8 @@ class Mesh:
                     material['alphaCutoff'] = 0.35
             if normal:
                 material['normalTexture'] = {'index': add_texture(normal), 'scale': 0.55}
+            if roughness_map:
+                pbr['metallicRoughnessTexture'] = {'index': add_texture(roughness_map)}
             gltf['materials'].append(material)
             gltf['meshes'][0]['primitives'].append({
                 'attributes': {'POSITION': accessor(pos, 3, bounds=True), 'NORMAL': accessor(norms, 3), 'TEXCOORD_0': accessor(uv, 2)},

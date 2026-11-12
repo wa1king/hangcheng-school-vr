@@ -53,6 +53,10 @@ export interface PlayerController {
   constrainCamera(target: THREE.Vector3, desired: THREE.Vector3): THREE.Vector3;
   /** Sweep the airborne avatar to the closest reachable position. */
   constrainFlight(fromFeet: THREE.Vector3, desiredFeet: THREE.Vector3): THREE.Vector3;
+  /** Find the nearest reachable solid surface below the airborne avatar. */
+  findLanding(feet: THREE.Vector3): THREE.Vector3 | undefined;
+  /** Project the avatar onto nearby solid ground for its contact shadow. */
+  groundSurface(feet: THREE.Vector3): { y: number; normal: RAPIER.Vector } | undefined;
   dispose(): void;
 }
 
@@ -190,6 +194,7 @@ export async function createPlayerController(
   environment: THREE.Object3D,
   spawn: THREE.Vector3,
   avatarModel?: PlayerAvatar,
+  repairMeshEdges = false,
 ): Promise<PlayerController> {
   rapierReady ??= RAPIER.init();
   await rapierReady;
@@ -197,7 +202,12 @@ export async function createPlayerController(
   const world = new RAPIER.World({ x: 0, y: -GRAVITY, z: 0 });
   const staticColliders = new Map<string, RAPIER.Collider>();
   world.timestep = FIXED_STEP;
-  world.createCollider(RAPIER.ColliderDesc.trimesh(vertices, indices));
+  const meshFlags = repairMeshEdges
+    ? RAPIER.TriMeshFlags.FIX_INTERNAL_EDGES_TWO_SIDED
+      | RAPIER.TriMeshFlags.DELETE_DEGENERATE_TRIANGLES
+      | RAPIER.TriMeshFlags.DELETE_DUPLICATE_TRIANGLES
+    : undefined;
+  world.createCollider(RAPIER.ColliderDesc.trimesh(vertices, indices, meshFlags));
   const rigidBody = world.createRigidBody(
     RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(spawn.x, spawn.y + CHARACTER_HALF_HEIGHT, spawn.z),
   );
@@ -231,6 +241,9 @@ export async function createPlayerController(
   const sweepResult = new THREE.Vector3();
   const flightCenter = new THREE.Vector3();
   const constrainedFlightCenter = new THREE.Vector3();
+  const slideFrom = new THREE.Vector3();
+  const slideTarget = new THREE.Vector3();
+  const slideNormal = new THREE.Vector3();
   const cameraBall = new RAPIER.Ball(0.16);
   const unrotated = { x: 0, y: 0, z: 0, w: 1 };
   let accumulator = 0;
@@ -305,15 +318,23 @@ export async function createPlayerController(
 
   const sweep = (from: THREE.Vector3, to: THREE.Vector3, shape: RAPIER.Shape, stopAtPenetration = true) => {
     sweepResult.copy(to);
-    if (disposed) return sweepResult;
+    if (disposed) return null;
     sweepDirection.subVectors(to, from);
     const length = sweepDirection.length();
-    if (length < 0.0001) return sweepResult;
+    if (length < 0.0001) return null;
     sweepDirection.divideScalar(length);
     const hit = world.castShape(from, unrotated, sweepDirection, shape, .005, length, stopAtPenetration,
       RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, undefined, collider, driving ? vehicles.bodyFor(driving.id) : undefined);
     if (hit) sweepResult.copy(from).addScaledVector(sweepDirection, Math.max(0, hit.time_of_impact - .01));
-    return sweepResult;
+    return hit;
+  };
+
+  const supportBelow = (x: number, y: number, z: number, maxDistance = 2000) => {
+    const ray = new RAPIER.Ray({ x, y, z }, { x: 0, y: -1, z: 0 });
+    const hit = world.castRayAndGetNormal(ray, maxDistance, true, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
+      undefined, collider);
+    if (!hit || hit.normal.y < Math.SQRT1_2) return undefined;
+    return { y: y - hit.timeOfImpact, normal: hit.normal };
   };
 
   return {
@@ -553,7 +574,8 @@ export async function createPlayerController(
       syncPosition();
     },
     constrainCamera(target, desired) {
-      return sweep(target, desired, cameraBall);
+      sweep(target, desired, cameraBall);
+      return sweepResult;
     },
     constrainFlight(fromFeet, desiredFeet) {
       flightCenter.copy(fromFeet);
@@ -561,9 +583,47 @@ export async function createPlayerController(
       const desiredCenter = constrainedFlightCenter.copy(desiredFeet);
       desiredCenter.y += CHARACTER_HALF_HEIGHT;
       // A capsule touching the floor must be able to move away from it at takeoff.
-      const result = sweep(flightCenter, desiredCenter, capsuleShape, false);
-      result.y -= CHARACTER_HALF_HEIGHT;
-      return result;
+      const hit = sweep(flightCenter, desiredCenter, capsuleShape, false);
+      if (hit && Math.abs(desiredCenter.y - flightCenter.y) < 0.001) {
+        // Preserve the component along the obstacle when flying diagonally.
+        slideFrom.copy(sweepResult);
+        slideNormal.set(hit.normal1.x, 0, hit.normal1.z);
+        if (slideNormal.lengthSq() > 0.0001) {
+          slideNormal.normalize();
+          slideTarget.subVectors(desiredCenter, slideFrom);
+          slideTarget.addScaledVector(slideNormal, -slideTarget.dot(slideNormal)).add(slideFrom);
+          sweep(slideFrom, slideTarget, capsuleShape, false);
+        }
+      }
+      sweepResult.y -= CHARACTER_HALF_HEIGHT;
+      return sweepResult;
+    },
+    findLanding(feet) {
+      if (disposed || ![feet.x, feet.y, feet.z].every(Number.isFinite)) return undefined;
+      const support = supportBelow(feet.x, feet.y + 0.055, feet.z);
+      if (!support || support.y > feet.y + 0.025) return undefined;
+
+      // A narrow railing or a slab edge is insufficient to support both feet.
+      const soleRadius = CHARACTER_RADIUS * 0.72;
+      for (const [dx, dz] of [[-soleRadius, 0], [soleRadius, 0], [0, -soleRadius], [0, soleRadius]]) {
+        const sample = supportBelow(feet.x + dx, feet.y + 0.20, feet.z + dz);
+        if (!sample || Math.abs(sample.y - support.y) > 0.18) return undefined;
+      }
+
+      const slopeClearance = CHARACTER_RADIUS * (1 / support.normal.y - 1);
+      const landing = new THREE.Vector3(feet.x, support.y + 0.035 + slopeClearance, feet.z);
+      const center = new THREE.Vector3(feet.x, landing.y + CHARACTER_HALF_HEIGHT, feet.z);
+      if (world.intersectionWithShape(center, unrotated, capsuleShape, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
+        undefined, collider)) return undefined;
+      if (landing.y < feet.y) {
+        const from = new THREE.Vector3(feet.x, feet.y + CHARACTER_HALF_HEIGHT, feet.z);
+        if (sweep(from, center, capsuleShape, false)) return undefined;
+      }
+      return landing;
+    },
+    groundSurface(feet) {
+      if (disposed) return undefined;
+      return supportBelow(feet.x, feet.y + 0.06, feet.z, 1.42);
     },
     dispose() {
       if (disposed) return;

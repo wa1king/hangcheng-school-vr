@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { loadCampus, type CampusPoint } from './campus.ts';
+import { createCampusLighting } from './campus-lighting.ts';
 import { createInput, type Mode } from './input.ts';
 import { createLandingQuery } from './landing.ts';
 import { createXrLocomotion } from './xr-locomotion.ts';
@@ -37,16 +38,13 @@ const flightGoal = new THREE.Vector3();
 const xrLocomotion = createXrLocomotion();
 const point = new THREE.Vector3();
 const orbitOffset = new THREE.Vector3();
-const sunOffset = new THREE.Vector3();
-const shadowFocus = new THREE.Vector3();
 
 let mode: Mode = 'overview';
 let campus: Awaited<ReturnType<typeof loadCampus>> | undefined;
 let player: PlayerController | undefined;
 let landingQuery: ReturnType<typeof createLandingQuery> | undefined;
 let renderer: THREE.WebGLRenderer;
-let sun: THREE.DirectionalLight | undefined;
-let activeShadowRadius = 0;
+let lighting: ReturnType<typeof createCampusLighting> | undefined;
 let yaw = 0;
 let pitch = 0;
 let avatarHeading = 0;
@@ -69,6 +67,9 @@ scene.add(rig);
 const tourAvatar = createTourAvatar();
 const updateCamera = createTourCamera(camera);
 tourAvatar.object.visible = false;
+tourAvatar.object.traverse(object => {
+  if (object instanceof THREE.Mesh) object.receiveShadow = true;
+});
 scene.add(tourAvatar.object);
 
 const orbit = new OrbitControls(camera, surface);
@@ -202,6 +203,21 @@ function setMode(next: Mode, destination?: CampusPoint) {
   if (!finished || !campus || xrSession || (next === 'walk' && !player) || (next === mode && !destination)) return;
   const previous = mode;
   clearLandingNotice();
+  let landing: THREE.Vector3 | undefined;
+  if (previous === 'fly' && next === 'walk' && !destination && player) {
+    landing = campus.manifest.collisionFromModels
+      ? player.findLanding(flightFeet)
+      : landingQuery?.(point.copy(flightFeet).addScaledVector(camera.up, eyeHeight));
+    if (!landing && (campus.manifest.collisionFromModels || landingQuery)) {
+      landingNotice = '脚下没有足够的落脚空间';
+      landingNoticeTimer = window.setTimeout(() => {
+        landingNotice = '';
+        updateHud();
+      }, 3000);
+      updateHud();
+      return;
+    }
+  }
   if (mode === 'walk') {
     savedWalkYaw = yaw;
     savedWalkPitch = pitch;
@@ -224,26 +240,14 @@ function setMode(next: Mode, destination?: CampusPoint) {
   if (next === 'overview') showOverview();
   if (next === 'walk' && player) {
     if (destination) resetFeet(destination);
-    else {
-      const landing = previous === 'fly'
-        ? landingQuery?.(point.copy(flightFeet).addScaledVector(camera.up, eyeHeight))
-        : undefined;
-      if (landing) {
-        player.teleport(landing);
-        lastSafeFeet.copy(landing);
-        pitch = THREE.MathUtils.clamp(pitch, -.5, .5);
-      } else {
-        player.teleport(lastSafeFeet);
-        yaw = savedWalkYaw;
-        pitch = savedWalkPitch;
-        if (previous === 'fly' && landingQuery) {
-          landingNotice = '这里没有合适的落脚处，已回到上次步行位置';
-          landingNoticeTimer = window.setTimeout(() => {
-            landingNotice = '';
-            updateHud();
-          }, 3000);
-        }
-      }
+    else if (landing) {
+      player.teleport(landing);
+      lastSafeFeet.copy(landing);
+      pitch = THREE.MathUtils.clamp(pitch, -.5, .5);
+    } else {
+      player.teleport(lastSafeFeet);
+      yaw = savedWalkYaw;
+      pitch = savedWalkPitch;
     }
   }
   updateTourView(0, 0, 0, true);
@@ -266,59 +270,6 @@ function moveToLocation() {
   }
   locations.value = '';
   surface.focus({ preventScroll: true });
-}
-
-function lightCampus() {
-  if (!campus) return;
-  const span = Math.max(campus.size.x, campus.size.z, 30);
-  scene.fog = new THREE.Fog('#b9d5e7', span * 1.9, span * 7);
-  camera.far = Math.max(600, span * 8);
-  camera.updateProjectionMatrix();
-  const backdropWidth = Math.max(3000, span * 16);
-  const backdrop = new THREE.Mesh(
-    new THREE.PlaneGeometry(backdropWidth, backdropWidth),
-    new THREE.MeshStandardMaterial({ color: '#708355', roughness: 1 }),
-  );
-  backdrop.rotation.x = -Math.PI / 2;
-  backdrop.position.set(campus.center.x, campus.bounds.min.y - .36, campus.center.z);
-  scene.add(backdrop);
-  const sky = new THREE.HemisphereLight('#e8f2fc', '#a9a189', 1.75);
-  sun = new THREE.DirectionalLight('#fff0d5', 2.85);
-  sunOffset.set(-span * .7, span * .95, -span * .48);
-  sun.castShadow = true;
-  const shadowSize = input.touch ? 1024 : 2048;
-  sun.shadow.mapSize.set(shadowSize, shadowSize);
-  sun.shadow.intensity = .82;
-  scene.add(sky, sun, sun.target);
-  updateSunShadow();
-}
-
-function updateSunShadow() {
-  if (!campus || !sun) return;
-  const nearPlayer = mode === 'walk' && player;
-  const radius = nearPlayer ? 32 : Math.max(campus.size.length() * .55, 15);
-  shadowFocus.copy(campus.center);
-  if (nearPlayer) {
-    // Refresh only when crossing a cell so walking does not redraw the map every frame.
-    const { x, y, z } = nearPlayer.position;
-    shadowFocus.set(Math.round(x / 10) * 10, Math.round(y / 10) * 10, Math.round(z / 10) * 10);
-  }
-  if (activeShadowRadius === radius && sun.target.position.equals(shadowFocus)) return;
-  sun.target.position.copy(shadowFocus);
-  sun.position.copy(shadowFocus).add(sunOffset);
-  if (activeShadowRadius !== radius) {
-    activeShadowRadius = radius;
-    const distance = sunOffset.length();
-    const depth = radius * 2.2;
-    Object.assign(sun.shadow.camera, {
-      left: -radius, right: radius, top: radius, bottom: -radius,
-      near: Math.max(.1, distance - depth), far: distance + depth,
-    });
-    sun.shadow.camera.updateProjectionMatrix();
-    sun.shadow.bias = nearPlayer ? -.00025 : -.00015;
-    sun.shadow.normalBias = nearPlayer ? .035 : .10;
-  }
-  renderer.shadowMap.needsUpdate = true;
 }
 
 function resize() {
@@ -356,13 +307,19 @@ function moveFlat(dt: number) {
   previousFeet.copy(flightFeet);
   const speed = input.running ? 22 : 9;
   const lift = THREE.MathUtils.clamp(input.lift, -1, 1);
-  const padding = Math.max(25, Math.max(campus.size.x, campus.size.z) * .4);
+  const usesModelCollision = campus.manifest.collisionFromModels && player;
+  const padding = usesModelCollision ? 0 : Math.max(25, Math.max(campus.size.x, campus.size.z) * .4);
   flightGoal.copy(flightFeet).addScaledVector(direction, dt * speed);
-  flightGoal.x = THREE.MathUtils.clamp(flightGoal.x, campus.bounds.min.x - padding, campus.bounds.max.x + padding);
-  flightGoal.z = THREE.MathUtils.clamp(flightGoal.z, campus.bounds.min.z - padding, campus.bounds.max.z + padding);
+  if (!usesModelCollision) {
+    flightGoal.x = THREE.MathUtils.clamp(flightGoal.x, campus.bounds.min.x - padding, campus.bounds.max.x + padding);
+    flightGoal.z = THREE.MathUtils.clamp(flightGoal.z, campus.bounds.min.z - padding, campus.bounds.max.z + padding);
+  }
   flightFeet.copy(player?.constrainFlight(flightFeet, flightGoal) ?? flightGoal);
   flightGoal.copy(flightFeet);
-  flightGoal.y = THREE.MathUtils.clamp(flightGoal.y + lift * speed * dt, campus.bounds.min.y + .02, campus.bounds.max.y + padding * 2);
+  flightGoal.y += lift * speed * dt;
+  if (!usesModelCollision) {
+    flightGoal.y = THREE.MathUtils.clamp(flightGoal.y, campus.bounds.min.y + .02, campus.bounds.max.y + padding * 2);
+  }
   flightFeet.copy(player?.constrainFlight(flightFeet, flightGoal) ?? flightGoal);
   updateTourView(dt, updateAvatarHeading(flightFeet, dt), lift);
 }
@@ -436,14 +393,15 @@ function frame(time: number, xrFrame?: XRFrame) {
     if (xrSession) moveXR(dt, xrFrame);
     else if (mode === 'overview') orbit.update(dt);
     else moveFlat(dt);
-    updateSunShadow();
   }
+  const feet = mode === 'walk' ? player?.position : mode === 'fly' ? flightFeet : undefined;
+  const ground = feet && tourAvatar.object.visible ? player?.groundSurface(feet) : undefined;
+  lighting?.update(mode, feet, ground);
   renderer.render(scene, camera);
   if (debug) {
     const coords = camera.position.toArray().map(value => value.toFixed(2)).join(', ');
     const { calls, triangles } = renderer.info.render;
-    const feet = mode === 'fly' ? flightFeet : player?.position;
-    const avatarCoords = feet?.toArray().map(value => value.toFixed(2)).join(', ') ?? '—';
+    const avatarCoords = (mode === 'overview' ? player?.position : feet)?.toArray().map(value => value.toFixed(2)).join(', ') ?? '—';
     const view = mode === 'overview' ? 'overview' : tourAvatar.object.visible ? 'follow' : 'eyes';
     diagnostics.textContent = `${mode}${mode === 'walk' && player?.grounded ? ' grounded' : ''}\n${coords}\n${calls} draws · ${triangles.toLocaleString()} tris\nheading ${yaw.toFixed(3)}\navatar ${avatarCoords}\nview ${view}`;
   }
@@ -476,8 +434,8 @@ async function initialize() {
   try {
     renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', logarithmicDepthBuffer: true });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.12;
+    renderer.toneMapping = THREE.AgXToneMapping;
+    renderer.toneMappingExposure = 1.20;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.autoUpdate = false;
     renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -495,7 +453,7 @@ async function initialize() {
     const pendingPlayer = import('./exploration/player.ts').catch((loadError: unknown) => ({ loadError }));
     campus = await loadCampus();
     scene.add(campus.visuals);
-    lightCampus();
+    lighting = createCampusLighting(scene, camera, renderer, campus, input.touch);
     showOverview();
     configureInfo(campus.manifest, campus.manifestURL);
     if (campus.collision.children.length) {
@@ -506,8 +464,11 @@ async function initialize() {
           campus.collision,
           new THREE.Vector3().fromArray(campus.manifest.spawn.position),
           { object: new THREE.Group(), updateMotion() {}, dispose() {} },
+          campus.manifest.collisionFromModels,
         );
-        if (campus.manifest.landingBoundary) landingQuery = createLandingQuery(campus.collision, campus.manifest.landingBoundary);
+        if (!campus.manifest.collisionFromModels && campus.manifest.landingBoundary) {
+          landingQuery = createLandingQuery(campus.collision, campus.manifest.landingBoundary);
+        }
       } catch (error) {
         console.warn('校园碰撞载入失败', error);
         get('description').append(' 本次载入未启用步行。');
@@ -576,6 +537,7 @@ get('retry').addEventListener('click', () => window.location.reload());
 window.addEventListener('pagehide', event => {
   if (event.persisted) return;
   player?.dispose();
+  lighting?.dispose();
   tourAvatar.dispose();
   orbit.dispose();
   if (!renderer) return;

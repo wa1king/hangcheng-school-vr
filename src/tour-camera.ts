@@ -31,7 +31,7 @@ export function createTourCamera(camera: PerspectiveCamera) {
         pivot.z + horizontal * headingZ - .32 * headingX,
       );
       const available = pivot.distanceTo(clearance ? clearance(pivot, desired) : desired);
-      showAvatar = available >= .85;
+      showAvatar = available >= 1.12;
       // Pull in immediately at walls and ease back once the space opens up.
       if (snap || !distance || !showAvatar) distance = available;
       else distance = Math.min(available, MathUtils.damp(distance, available, 8, dt));
