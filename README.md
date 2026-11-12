@@ -8,7 +8,7 @@
 
 需要 Node.js 22.14 或以上。运行 `npm ci`，再运行 `npm run dev`。`npm run build` 生成 `dist`。GitHub Pages 从 `main` 分支的 `docs` 目录发布。
 
-`tools/build_campus.py` 用开放地图数据生成场景模型。重新生成时需要 Python、NumPy、Pillow、Shapely、Mapbox Earcut 以及 Windows 字体。
+`tools/build_campus.py` 用开放地图数据生成场景模型。重新生成时需要 Python、NumPy、Pillow、Shapely、Mapbox Earcut 以及 Windows 字体。发布模型使用 Meshopt 压缩。重新生成后可用 `npx gltfpack@1.3.0 -i public/scene/campus.glb -o public/scene/campus.packed.glb -cc -noq -kn -km -ke` 生成压缩版，再用压缩版替换 `campus.glb`。构建后将 `dist` 内容更新到 `docs` 并保留 `.nojekyll`。
 
 ## 数据与署名
 
