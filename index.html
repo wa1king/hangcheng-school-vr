@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#142926" />
+    <link rel="icon" href="data:," />
+    <title>航城学校 · 3D 校园</title>
+  </head>
+  <body>
+    <main id="app" data-mode="overview">
+      <div id="viewport" aria-label="三维校园场景"></div>
+      <div class="shade" aria-hidden="true"></div>
+      <header class="header">
+        <div class="identity">
+          <span class="site-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+          <div>
+            <h1 id="campus-title">航城学校</h1>
+            <p id="campus-status">3D 校园</p>
+          </div>
+        </div>
+        <div class="utilities">
+          <button id="vr" class="utility" type="button" hidden>头显 VR</button>
+          <button id="fullscreen" class="utility" type="button" hidden><span class="fullscreen-glyph" aria-hidden="true"></span>全屏</button>
+          <button id="about" class="utility" type="button" aria-expanded="false" aria-controls="about-panel">资料</button>
+        </div>
+      </header>
+      <aside id="about-panel" class="about-panel" hidden aria-label="场景资料">
+        <h2>场景资料</h2>
+        <p id="description"></p>
+        <a id="evidence" hidden target="_blank" rel="noopener">查看资料来源 <span aria-hidden="true">↗</span></a>
+      </aside>
+      <section id="notice" class="notice" aria-live="polite">
+        <span id="loading-mark" class="loading-mark" aria-hidden="true"></span>
+        <strong id="notice-title">正在加载校园</strong>
+        <span id="notice-detail">读取场景和可步行区域</span>
+        <button id="retry" class="utility" type="button" hidden>重新加载</button>
+      </section>
+      <div id="reticle" aria-hidden="true" hidden></div>
+      <div id="move-pad" class="move-pad" aria-label="触屏移动摇杆" hidden><span id="move-thumb"></span></div>
+      <div id="vertical-buttons" class="vertical-buttons" hidden>
+        <button type="button" data-lift="1" aria-label="上升">↑</button>
+        <button type="button" data-lift="-1" aria-label="下降">↓</button>
+      </div>
+      <div class="location" id="location-wrap" hidden>
+        <label for="location">前往</label>
+        <select id="location" aria-label="前往场景地点">
+          <option value="">选择地点</option>
+        </select>
+      </div>
+      <div class="hud-bottom">
+        <p id="controls-hint" class="controls-hint" aria-live="polite" hidden></p>
+        <div class="mode-controls" aria-label="游览方式" role="group">
+          <button type="button" data-mode="overview" disabled aria-pressed="true"><span aria-hidden="true">▦</span>总览</button>
+          <button type="button" data-mode="walk" disabled aria-pressed="false"><span aria-hidden="true">◎</span>步行</button>
+          <button type="button" data-mode="fly" disabled aria-pressed="false"><span aria-hidden="true">↗</span>飞行</button>
+          <button type="button" id="reset" disabled aria-label="回到起点" title="回到起点"><span aria-hidden="true">↺</span><span class="reset-label">复位</span></button>
+        </div>
+      </div>
+      <a class="map-credit" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>
+      <pre id="diagnostics" hidden aria-hidden="true"></pre>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
