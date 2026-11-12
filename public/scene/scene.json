@@ -1,14 +1,14 @@
 {
   "title": "深圳市宝安区航城学校",
-  "status": "外观参考重建 · 室内布局示意",
-  "description": "航空路 10 号本部。课堂方位以从校门面向主楼为北。游览范围为校内，可进入教学楼，沿走廊和楼梯走到屋顶，也可在校内观察周边街景。楼内布局为游览示意。",
+  "status": "画校园路线图 · 二年级数学",
+  "description": "站在学校正门，向北进校，向南隔着航空路能看到航城文体公园。进校后，从教学楼东侧绕行，往北走，再往西到教学楼后方，可以看到后排教学楼和球场。游览范围为校内，楼内布局为游览示意。",
   "northYaw": 0.41887902,
   "models": [
     {
-      "url": "./campus.glb?v=fed58125345f"
+      "url": "./campus.glb?v=04efe4702478"
     },
     {
-      "url": "./surroundings.glb?v=8a9b84e86a4e",
+      "url": "./surroundings.glb?v=821d1aa179fd",
       "surroundings": true
     }
   ],
@@ -84,7 +84,7 @@
   "locations": [
     {
       "id": "gate",
-      "label": "校门广场",
+      "label": "学校正门",
       "position": [
         40.977,
         0,
@@ -92,6 +92,28 @@
       ],
       "yaw": 0.41888,
       "pitch": 0.22
+    },
+    {
+      "id": "park-view",
+      "label": "南望航城文体公园",
+      "position": [
+        40.977,
+        0,
+        65.605
+      ],
+      "yaw": 3.56047,
+      "pitch": -0.015
+    },
+    {
+      "id": "rear",
+      "label": "教学楼后方",
+      "position": [
+        35.546,
+        0,
+        -63.99
+      ],
+      "yaw": 0.41888,
+      "pitch": 0.13
     },
     {
       "id": "west-street-view",

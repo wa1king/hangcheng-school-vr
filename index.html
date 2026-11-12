@@ -17,6 +17,7 @@
           <div>
             <h1 id="campus-title">航城学校</h1>
             <p id="campus-status">3D 校园</p>
+            <p id="campus-orientation">从正门向北进校，向南看航城文体公园</p>
           </div>
         </div>
         <div class="utilities">
@@ -32,6 +33,7 @@
         <button type="button" data-heading="south" aria-label="面向南" aria-pressed="false">南</button>
         <button type="button" data-heading="west" aria-label="面向西" aria-pressed="false">西</button>
         <button type="button" data-turn="right" title="向右转 90°">右转</button>
+        <span id="turn-status" class="turn-status" aria-live="polite"></span>
       </div>
       <aside id="about-panel" class="about-panel" hidden aria-label="场景资料">
         <h2>场景资料</h2>
@@ -45,7 +47,13 @@
         <button id="retry" class="utility" type="button" hidden>重新加载</button>
       </section>
       <div id="reticle" aria-hidden="true" hidden></div>
-      <div id="move-pad" class="move-pad" aria-label="触屏移动摇杆" hidden><span id="move-thumb"></span></div>
+      <div id="move-pad" class="move-pad" role="group" aria-label="拖动摇杆移动视角" hidden>
+        <span class="move-tick move-up" aria-hidden="true">▴</span>
+        <span class="move-tick move-right" aria-hidden="true">▸</span>
+        <span class="move-tick move-down" aria-hidden="true">▾</span>
+        <span class="move-tick move-left" aria-hidden="true">◂</span>
+        <span id="move-thumb" aria-hidden="true">移动</span>
+      </div>
       <div id="vertical-buttons" class="vertical-buttons" hidden>
         <button type="button" data-lift="1" aria-label="上升">↑</button>
         <button type="button" data-lift="-1" aria-label="下降">↓</button>

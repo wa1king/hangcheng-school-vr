@@ -6,10 +6,10 @@
     <meta name="theme-color" content="#142926" />
     <link rel="icon" href="data:," />
     <title>航城学校 · 3D 校园</title>
-    <script type="module" crossorigin src="./assets/index-CQ2cS9qX.js"></script>
+    <script type="module" crossorigin src="./assets/index-BiLqDrtU.js"></script>
     <link rel="modulepreload" crossorigin href="./assets/three-runtime-CV2Ouew1.js">
-    <link rel="stylesheet" crossorigin href="./assets/index-Dz3H7tlf.css">
-    <link rel="preload" as="fetch" href="./scene/campus.glb?v=fed58125345f" crossorigin="anonymous" fetchpriority="low">
+    <link rel="stylesheet" crossorigin href="./assets/index-ARDzTgMP.css">
+    <link rel="preload" as="fetch" href="./scene/campus.glb?v=04efe4702478" crossorigin="anonymous" fetchpriority="low">
   </head>
   <body>
     <main id="app" data-mode="overview">
@@ -21,6 +21,7 @@
           <div>
             <h1 id="campus-title">航城学校</h1>
             <p id="campus-status">3D 校园</p>
+            <p id="campus-orientation">从正门向北进校，向南看航城文体公园</p>
           </div>
         </div>
         <div class="utilities">
@@ -36,6 +37,7 @@
         <button type="button" data-heading="south" aria-label="面向南" aria-pressed="false">南</button>
         <button type="button" data-heading="west" aria-label="面向西" aria-pressed="false">西</button>
         <button type="button" data-turn="right" title="向右转 90°">右转</button>
+        <span id="turn-status" class="turn-status" aria-live="polite"></span>
       </div>
       <aside id="about-panel" class="about-panel" hidden aria-label="场景资料">
         <h2>场景资料</h2>
@@ -49,7 +51,13 @@
         <button id="retry" class="utility" type="button" hidden>重新加载</button>
       </section>
       <div id="reticle" aria-hidden="true" hidden></div>
-      <div id="move-pad" class="move-pad" aria-label="触屏移动摇杆" hidden><span id="move-thumb"></span></div>
+      <div id="move-pad" class="move-pad" role="group" aria-label="拖动摇杆移动视角" hidden>
+        <span class="move-tick move-up" aria-hidden="true">▴</span>
+        <span class="move-tick move-right" aria-hidden="true">▸</span>
+        <span class="move-tick move-down" aria-hidden="true">▾</span>
+        <span class="move-tick move-left" aria-hidden="true">◂</span>
+        <span id="move-thumb" aria-hidden="true">移动</span>
+      </div>
       <div id="vertical-buttons" class="vertical-buttons" hidden>
         <button type="button" data-lift="1" aria-label="上升">↑</button>
         <button type="button" data-lift="-1" aria-label="下降">↓</button>
@@ -69,7 +77,7 @@
           <button type="button" id="reset" disabled aria-label="回到起点" title="回到起点"><span aria-hidden="true">↺</span><span class="reset-label">复位</span></button>
         </div>
       </div>
-      <span id="site-version" class="site-version">版本 2026.11.12-210844</span>
+      <span id="site-version" class="site-version">版本 2026.11.12-213438</span>
       <a class="map-credit" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>
       <pre id="diagnostics" hidden aria-hidden="true"></pre>
     </main>

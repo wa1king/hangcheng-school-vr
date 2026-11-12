@@ -18,6 +18,7 @@ from shapely.geometry.polygon import orient
 from access import building_access
 from architecture import building, entrance, materials, slab
 from campus_perimeter import add_perimeter
+from classroom_campus import add_reference_structures
 from entry_details import STAIR_CENTER, add_entry_details, entry_drain_opening
 from entry_greenery import detailed_tree, register_greenery
 from street_trees import register_street_trees, street_tree
@@ -141,7 +142,9 @@ def manifest(dest, polygons):
             revision = file_digest(file, 'sha256').hexdigest()[:12]
         return f'./{name}?v={revision}'
 
-    places = [location('gate', '校门广场', STAIR_CENTER, 76.6, pitch=0.22),
+    places = [location('gate', '学校正门', STAIR_CENTER, 76.6, pitch=0.22),
+              location('park-view', '南望航城文体公园', STAIR_CENTER, 76.6, math.pi, pitch=-.015),
+              location('rear', '教学楼后方', 58.5, -44.0, pitch=.13),
               location('west-street-view', '校内西侧望路口', -137, 74.5, math.pi, pitch=-.025),
               location('track', '田径场', -72.6, -22.1, -0.95),
               location('stands', '西侧看台', -92.0, -52.0, 0.97),
@@ -162,8 +165,8 @@ def manifest(dest, polygons):
     tour_boundary = campus.buffer(-.27, join_style='mitre')
     data = {
         'title': '深圳市宝安区航城学校',
-        'status': '外观参考重建 · 室内布局示意',
-        'description': '航空路 10 号本部。课堂方位以从校门面向主楼为北。游览范围为校内，可进入教学楼，沿走廊和楼梯走到屋顶，也可在校内观察周边街景。楼内布局为游览示意。',
+        'status': '画校园路线图 · 二年级数学',
+        'description': '站在学校正门，向北进校，向南隔着航空路能看到航城文体公园。进校后，从教学楼东侧绕行，往北走，再往西到教学楼后方，可以看到后排教学楼和球场。游览范围为校内，楼内布局为游览示意。',
         'northYaw': round(-ANGLE, 8),
         'models': [{'url': resource('campus.glb')}, {'url': resource('surroundings.glb'), 'surroundings': True}],
         'collisionFromModels': True,
@@ -189,6 +192,7 @@ def main(target=BASE / 'public' / 'scene'):
     entrance(visual)
     add_entry_details(visual)
     add_sports(visual, polygons)
+    add_reference_structures(visual, polygons)
     apply_surface_materials(visual)
     target.mkdir(parents=True, exist_ok=True)
     count = visual.export(target / 'campus.glb')

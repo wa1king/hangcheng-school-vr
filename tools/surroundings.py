@@ -10,6 +10,7 @@ from shapely.geometry import Polygon
 from shapely.geometry.polygon import orient
 
 from mesh import rect
+from neighborhood_park import add_culture_terraces, add_neighborhood_park
 
 
 GROUND = -.27
@@ -136,7 +137,7 @@ def register_materials(mesh):
     mesh.material('context-wall', (171, 171, 159), .94)
     mesh.material('context-paving', (152, 150, 137), .96)
     mesh.material('context-coping', (201, 199, 188), .96)
-    mesh.material('context-metal-roof', (81, 110, 92), .93)
+    return grass
 
 
 def wall_band(mesh, a, b, bottom, top, material, bays, floors, offset):
@@ -150,12 +151,12 @@ def wall_band(mesh, a, b, bottom, top, material, bays, floors, offset):
               uv=[(u0, v), (u0, 0), (u1, 0), (u1, v)])
 
 
-def shell(mesh, outline, height, floors, family, seed, green_roof=False):
+def shell(mesh, outline, height, floors, family, seed, equipment=True):
     polygon = orient(Polygon(outline).simplify(.13, preserve_topology=True), sign=1)
     ring = list(polygon.exterior.coords)
     roof = GROUND + height
     podium = GROUND + min(height / floors, 4.5) if floors > 1 else roof
-    mesh.surface('context-roof' if not green_roof else 'context-metal-roof', ring, roof)
+    mesh.surface('context-roof', ring, roof)
     mesh.surface('context-paving', polygon.buffer(1.3, join_style='mitre').exterior.coords, GROUND + .10)
     for index, (a, b) in enumerate(zip(ring, ring[1:])):
         span = math.dist(a, b)
@@ -165,8 +166,7 @@ def shell(mesh, outline, height, floors, family, seed, green_roof=False):
         if floors > 1:
             wall_band(mesh, a, b, podium, roof, f'context-{family}',
                       max(1, round(span / (3.15 if family != 'glass' else 2.85))), floors - 1, offset)
-        mesh.strip('context-metal-roof' if green_roof else 'context-coping', a, b,
-                   .32 if green_roof else .25, roof, .42 if green_roof else .82)
+        mesh.strip('context-coping', a, b, .25, roof, .82)
         if span > 9 and floors > 10:
             # Tall service-wall accents are real profile breaks, roof gear stays low-poly.
             tx, tz = (b[0] - a[0]) / span, (b[1] - a[1]) / span
@@ -175,7 +175,7 @@ def shell(mesh, outline, height, floors, family, seed, green_roof=False):
                 mesh.box('context-coping', x + tz * .10, podium, z - tx * .10,
                          .38, roof - podium, .40, math.atan2(tz, tx))
 
-    if floors < 2:
+    if floors < 2 or not equipment:
         return
     interior = polygon.buffer(-1.65)
     if interior.is_empty:
@@ -193,7 +193,7 @@ def shell(mesh, outline, height, floors, family, seed, green_roof=False):
 
 
 def add_surroundings(mesh, polygons):
-    register_materials(mesh)
+    grass = register_materials(mesh)
     # The outer ground continues below the existing school and road surfaces.
     mesh.surface('context-ground', rect(-9, 44, 1050, 770), GROUND - .07)
     for ident in PARCELS:
@@ -203,6 +203,8 @@ def add_surroundings(mesh, polygons):
             storey = 3.12 if floors >= 15 else 3.55
             shell(mesh, polygons[ident][0], floors * storey + .95, floors, family, ident)
     # The design review for the cultural center specifies three floors and 15.40 m.
-    shell(mesh, polygons[1436051956][0], 15.4, 3, 'glass', 1436051956)
-    # The one-storey green-roof hall across Aviation Road is visible in aerial imagery.
-    shell(mesh, rect(33, 127, 49, 22), 6.4, 1, 'glass', 41, green_roof=True)
+    cultural_center = polygons[1436051956][0]
+    shell(mesh, cultural_center, 15.4, 3, 'glass', 1436051956, equipment=False)
+    paving = (SCANS.joinpath('floor-pavement-color.jpg').read_bytes(), 'image/jpeg')
+    add_neighborhood_park(mesh, jpeg, grass, paving)
+    add_culture_terraces(mesh, cultural_center, GROUND + 15.4)

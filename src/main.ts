@@ -24,6 +24,7 @@ const vr = get<HTMLButtonElement>('vr');
 const locations = get<HTMLSelectElement>('location');
 const modeButtons = [...app.querySelectorAll<HTMLButtonElement>('.mode-controls [data-mode]')];
 const directionControls = get('direction-controls');
+const turnStatus = get('turn-status');
 const directionButtons = [...directionControls.querySelectorAll<HTMLButtonElement>('[data-heading]')];
 const turnButtons = [...directionControls.querySelectorAll<HTMLButtonElement>('[data-turn]')];
 const reset = get<HTMLButtonElement>('reset');
@@ -62,6 +63,8 @@ let traffic: ReturnType<typeof createCampusTraffic>;
 let pavement: ReturnType<typeof createCampusGroundReflection> | undefined;
 let campusRenderer: ReturnType<typeof createCampusRenderer>;
 let heading = 0;
+let viewYaw = 0;
+let turnMotion: { start: number; arc: number; durationMs: number; startTime: number } | undefined;
 let pitch = 0;
 let savedWalkPitch = 0;
 let viewZoom = 1;
@@ -93,10 +96,31 @@ orbit.screenSpacePanning = false;
 
 function setHeading(next: number) {
   if (!finished || xrSession || next === heading) return;
+  const target = directions[next].yaw;
+  const arc = THREE.MathUtils.euclideanModulo(target - viewYaw + Math.PI, Math.PI * 2) - Math.PI;
   heading = next;
-  if (mode === 'overview') orientOverview();
-  else updateTourView();
+  if (Math.abs(arc) < .001) {
+    settleHeading();
+  } else {
+    turnMotion = { start: viewYaw, arc, durationMs: Math.max(320, 1180 * Math.abs(arc) / (Math.PI / 2)), startTime: performance.now() };
+  }
   updateDirectionHud();
+}
+
+function settleHeading() {
+  viewYaw = directions[heading].yaw;
+  turnMotion = undefined;
+}
+
+function advanceTurn(time: number) {
+  if (!turnMotion) return false;
+  const progress = THREE.MathUtils.clamp((time - turnMotion.startTime) / turnMotion.durationMs, 0, 1);
+  viewYaw = turnMotion.start + turnMotion.arc * (progress * progress * (3 - 2 * progress));
+  if (progress === 1) {
+    settleHeading();
+    updateDirectionHud();
+  }
+  return true;
 }
 
 function turn(step: -1 | 1) {
@@ -104,7 +128,7 @@ function turn(step: -1 | 1) {
 }
 
 function directionYaw() {
-  return (campus?.manifest.northYaw ?? 0) + directions[heading].yaw;
+  return (campus?.manifest.northYaw ?? 0) + viewYaw;
 }
 
 function setCameraZoom() {
@@ -132,8 +156,11 @@ const input = createInput({
 });
 
 function updateDirectionHud() {
+  const destination = directions[heading];
+  directionControls.dataset.turning = String(Boolean(turnMotion));
+  turnStatus.textContent = turnMotion ? `正在转向${destination.label}` : '';
   for (const button of directionButtons) {
-    button.setAttribute('aria-pressed', String(button.dataset.heading === directions[heading].id));
+    button.setAttribute('aria-pressed', String(button.dataset.heading === destination.id));
   }
 }
 
@@ -149,31 +176,31 @@ function updateHud() {
   directionControls.hidden = !ready || Boolean(xrSession);
   updateDirectionHud();
   get('reticle').hidden = !ready || mode === 'overview' || input.touch;
-  get('move-pad').hidden = !ready || mode === 'overview' || !input.touch;
+  get('move-pad').hidden = !ready || Boolean(xrSession);
   get('vertical-buttons').hidden = !ready || mode !== 'fly' || !input.touch;
   controlsHint.hidden = !ready;
   if (!ready) return;
   const desktop: Record<Mode, string> = {
-    overview: '← → 转向 · 滚轮缩放 · 右键拖动平移',
-    walk: 'WASD 移动 · ← → 转向 · 滚轮缩放',
-    fly: 'WASD 移动 · E 上升 · Q 下降 · ← → 转向',
+    overview: '摇杆平移 · 滚轮缩放 · 点击方位转向',
+    walk: '摇杆或 WASD 移动 · 滚轮缩放 · 点击方位转向',
+    fly: '摇杆或 WASD 移动 · E 上升 · Q 下降',
   };
   const touch: Record<Mode, string> = {
-    overview: '单指左右滑动转向 · 双指缩放和平移',
-    walk: '摇杆移动 · 单指左右滑动转向 · 双指缩放',
-    fly: '摇杆移动 · 单指左右滑动转向 · 双指缩放',
+    overview: '摇杆平移 · 双指缩放 · 点击方位转向',
+    walk: '摇杆移动 · 双指缩放 · 点击方位转向',
+    fly: '摇杆移动 · 右侧按钮升降 · 双指缩放',
   };
   controlsHint.textContent = landingNotice || (input.touch ? touch : desktop)[mode];
 }
 
 const overviewScale = (aspect: number) => Math.max(1, 1.05 / aspect);
 
-function orientOverview() {
+function orientOverview(dt?: number) {
   const yaw = directionYaw();
   const distance = Math.hypot(camera.position.x - orbit.target.x, camera.position.z - orbit.target.z);
   camera.position.x = orbit.target.x + Math.sin(yaw) * distance;
   camera.position.z = orbit.target.z + Math.cos(yaw) * distance;
-  updateOverview();
+  updateOverview(dt);
 }
 
 function constrainTravel(from: THREE.Vector3, to: THREE.Vector3) {
@@ -221,6 +248,7 @@ function faceLocation(at: CampusPoint, defaultPitch = 0) {
   const north = campus?.manifest.northYaw ?? 0;
   const offset = (at.yaw ?? north) - north;
   heading = THREE.MathUtils.euclideanModulo(Math.round(-offset / (Math.PI / 2)), directions.length);
+  settleHeading();
   pitch = at.pitch ?? defaultPitch;
 }
 
@@ -347,12 +375,25 @@ function resize() {
   renderer.setSize(width, height, false);
 }
 
-function moveFlat(dt: number) {
+function readMovement() {
   const yaw = directionYaw();
   forward.set(-Math.sin(yaw), 0, -Math.cos(yaw));
   right.set(Math.cos(yaw), 0, -Math.sin(yaw));
   direction.copy(forward).multiplyScalar(input.ahead).addScaledVector(right, input.side);
   direction.clampLength(0, 1);
+}
+
+function moveOverview(dt: number, turning: boolean) {
+  readMovement();
+  const distance = Math.min(80, Math.max(6, (camera.position.y - orbit.target.y) * .28)) * dt;
+  camera.position.addScaledVector(direction, distance);
+  orbit.target.addScaledVector(direction, distance);
+  if (turning) orientOverview(dt);
+  else updateOverview(dt);
+}
+
+function moveFlat(dt: number) {
+  readMovement();
   if (mode === 'walk' && player) {
     player.update(dt, direction, input.running, input.jumping);
     if (player.grounded) lastSafeFeet.copy(player.position);
@@ -419,6 +460,7 @@ async function enterVR() {
   try {
     const session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures: ['local-floor'] });
     setMode('walk');
+    settleHeading();
     xrSession = session;
     input.releaseAll();
     updateHud();
@@ -449,8 +491,11 @@ function frame(time: number, xrFrame?: XRFrame) {
   lastFrame = time;
   if (finished) {
     if (xrSession) moveXR(dt, xrFrame);
-    else if (mode === 'overview') updateOverview(dt);
-    else moveFlat(dt);
+    else {
+      const turning = advanceTurn(time);
+      if (mode === 'overview') moveOverview(dt, turning);
+      else moveFlat(dt);
+    }
   }
   const feet = mode === 'walk' ? player?.position : mode === 'fly' ? flightFeet : undefined;
   lighting?.update(mode, feet, firstFramePresented, dt);

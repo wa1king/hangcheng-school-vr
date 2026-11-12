@@ -474,6 +474,7 @@ def northern_hall(mesh, polygon, lower_roof, roof_top):
 
 def building(mesh, footprint, ident, floors, floor_height):
     from access import HALF_WIDTH, build_access, build_upper_roof_stair, building_access
+    from classroom_campus import draw_roof_cores
     from connectors import CONNECTOR_AREA, build_connectors
     from interiors import (CLASSROOM_EXTERIOR_AREA, STAIR_VOID, WING_AREA, WING_NORTH, add_teaching_wing,
                            courtyard_edge, draw_classroom_exterior, facade_spans, interior_materials)
@@ -541,13 +542,17 @@ def building(mesh, footprint, ident, floors, floor_height):
         upper = poly.intersection(box(-30, -43, 79, -17.9))
         north_roof = 22.0
         northern_hall(mesh, upper, total + 0.045, north_roof)
-        roof_terraces(mesh, upper, ident, north_roof - 0.054)
-        clear = stair_void.buffer(1.5).union(box(27.0, -19.0, 32.8, 3.2))
-        roof_terraces(mesh, poly.difference(upper), ident, total, clear)
+        upper_cores = draw_roof_cores(mesh, upper, ident, north_roof)
+        roof_terraces(mesh, upper, ident, north_roof - 0.054, upper_cores)
+        lower_roof = poly.difference(upper)
+        lower_cores = draw_roof_cores(mesh, lower_roof, ident, total + .05)
+        clear = unary_union([stair_void.buffer(1.5), box(27.0, -19.0, 32.8, 3.2), lower_cores])
+        roof_terraces(mesh, lower_roof, ident, total, clear)
         build_upper_roof_stair(mesh, total + .05, north_roof)
         build_connectors(mesh, floors, floor_height)
     else:
-        clear = stair_void.buffer(1.65).union(access.polygon(2.35, .50, 4.75, 3.6))
+        roof_cores = draw_roof_cores(mesh, poly, ident, total + .05)
+        clear = unary_union([stair_void.buffer(1.65), access.polygon(2.35, .50, 4.75, 3.6), roof_cores])
         roof_terraces(mesh, poly, ident, total, clear)
         build_access(mesh, access, floors, floor_height)
 

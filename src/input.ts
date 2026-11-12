@@ -122,7 +122,8 @@ export function createInput(options: {
     options.zoom(Math.exp(-distance * .002));
   }, { passive: false });
   movePad.addEventListener('pointerdown', event => {
-    if (joystick !== null) return;
+    if (joystick !== null || event.button !== 0) return;
+    event.preventDefault();
     joystick = event.pointerId;
     movePad.setPointerCapture(event.pointerId);
     moveJoystick(event);
