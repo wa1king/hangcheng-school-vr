@@ -25,6 +25,13 @@
           <button id="about" class="utility" type="button" aria-expanded="false" aria-controls="about-panel">资料</button>
         </div>
       </header>
+      <div class="tour-controls">
+        <div id="avatar-controls" class="avatar-controls" role="group" aria-label="选择游览角色" hidden>
+          <button type="button" data-avatar="taoqi" aria-pressed="true"><span class="avatar-swatch" aria-hidden="true"></span>淘气</button>
+          <button type="button" data-avatar="xiaoxiao" aria-pressed="false"><span class="avatar-swatch" aria-hidden="true"></span>笑笑</button>
+        </div>
+        <button id="view-toggle" class="utility view-toggle" type="button" aria-label="第一人称视角" aria-pressed="false" hidden><span class="view-label">跟随视角</span></button>
+      </div>
       <aside id="about-panel" class="about-panel" hidden aria-label="场景资料">
         <h2>场景资料</h2>
         <p id="description"></p>

@@ -4,6 +4,8 @@ import { loadCampus, type CampusPoint } from './campus.ts';
 import { createInput, type Mode } from './input.ts';
 import { createLandingQuery } from './landing.ts';
 import { createXrLocomotion } from './xr-locomotion.ts';
+import { createTourAvatar, type TourCharacter } from './tour-avatar.ts';
+import { createTourCamera, eyeHeight } from './tour-camera.ts';
 import type { PlayerController } from './exploration/player.ts';
 import './style.css';
 
@@ -17,17 +19,21 @@ const fullscreen = get<HTMLButtonElement>('fullscreen');
 const vr = get<HTMLButtonElement>('vr');
 const locations = get<HTMLSelectElement>('location');
 const modeButtons = [...app.querySelectorAll<HTMLButtonElement>('.mode-controls [data-mode]')];
+const avatarControls = get('avatar-controls');
+const avatarButtons = [...avatarControls.querySelectorAll<HTMLButtonElement>('[data-avatar]')];
+const viewToggle = get<HTMLButtonElement>('view-toggle');
+const viewLabel = viewToggle.querySelector<HTMLElement>('.view-label')!;
 const reset = get<HTMLButtonElement>('reset');
 const controlsHint = get('controls-hint');
 const diagnostics = get('diagnostics');
 const debug = new URLSearchParams(window.location.search).has('debug');
-const eyeHeight = 1.64;
-const euler = new THREE.Euler(0, 0, 0, 'YXZ');
 const forward = new THREE.Vector3();
 const right = new THREE.Vector3();
 const direction = new THREE.Vector3();
 const lastSafeFeet = new THREE.Vector3();
-const lastOrientation = new THREE.Quaternion();
+const previousFeet = new THREE.Vector3();
+const flightFeet = new THREE.Vector3();
+const flightGoal = new THREE.Vector3();
 const xrLocomotion = createXrLocomotion();
 const point = new THREE.Vector3();
 const orbitOffset = new THREE.Vector3();
@@ -43,6 +49,9 @@ let sun: THREE.DirectionalLight | undefined;
 let activeShadowRadius = 0;
 let yaw = 0;
 let pitch = 0;
+let avatarHeading = 0;
+let firstPerson = false;
+let selectedAvatar: TourCharacter = 'taoqi';
 let savedWalkYaw = 0;
 let savedWalkPitch = 0;
 let finished = false;
@@ -57,6 +66,10 @@ const camera = new THREE.PerspectiveCamera(57, 1, .07, 1600);
 const rig = new THREE.Group();
 rig.add(camera);
 scene.add(rig);
+const tourAvatar = createTourAvatar();
+const updateCamera = createTourCamera(camera);
+tourAvatar.object.visible = false;
+scene.add(tourAvatar.object);
 
 const orbit = new OrbitControls(camera, surface);
 orbit.enabled = false;
@@ -67,12 +80,6 @@ orbit.minDistance = 5;
 orbit.zoomSpeed = .95;
 orbit.rotateSpeed = .6;
 orbit.enablePan = true;
-
-function directionFromCamera() {
-  euler.setFromQuaternion(camera.quaternion, 'YXZ');
-  yaw = euler.y;
-  pitch = euler.x;
-}
 
 function look(dx: number, dy: number) {
   if (mode === 'overview' || xrSession) return;
@@ -101,7 +108,14 @@ function updateHud() {
     button.setAttribute('aria-pressed', String(mode === buttonMode));
   }
   reset.disabled = !ready;
-  get('reticle').hidden = !ready || mode === 'overview' || input.touch;
+  avatarControls.hidden = !ready || Boolean(xrSession);
+  viewToggle.hidden = !ready || mode === 'overview' || Boolean(xrSession);
+  viewToggle.setAttribute('aria-pressed', String(firstPerson));
+  viewLabel.textContent = firstPerson ? '第一人称' : '跟随视角';
+  for (const button of avatarButtons) {
+    button.setAttribute('aria-pressed', String(button.dataset.avatar === selectedAvatar));
+  }
+  get('reticle').hidden = !ready || mode === 'overview' || input.touch || !firstPerson;
   get('move-pad').hidden = !ready || mode === 'overview' || !input.touch;
   get('vertical-buttons').hidden = !ready || mode !== 'fly' || !input.touch;
   controlsHint.hidden = !ready;
@@ -139,10 +153,15 @@ function showOverview() {
   orbit.update();
 }
 
-function updateWalkCamera() {
-  if (!player) return;
-  camera.position.copy(player.position);
-  camera.position.y += eyeHeight;
+function updateTourView(dt: number, speed = 0, lift = 0, snap = false) {
+  const feet = mode === 'walk' ? player?.position : flightFeet;
+  if (!feet || mode === 'overview' || xrSession) {
+    tourAvatar.object.visible = false;
+    return;
+  }
+  tourAvatar.object.position.copy(feet);
+  tourAvatar.update(dt, mode, speed, avatarHeading, lift);
+  tourAvatar.object.visible = updateCamera(feet, yaw, pitch, mode === 'fly', firstPerson, dt, snap, player?.constrainCamera);
 }
 
 function resetFeet(at: CampusPoint) {
@@ -153,6 +172,7 @@ function resetFeet(at: CampusPoint) {
   savedWalkPitch = at.pitch ?? 0;
   yaw = savedWalkYaw;
   pitch = savedWalkPitch;
+  avatarHeading = yaw - .42;
 }
 
 function clearLandingNotice() {
@@ -170,12 +190,12 @@ function resetView() {
     return;
   }
   resetFeet(campus.manifest.spawn);
-  if (mode === 'walk') updateWalkCamera();
-  else {
-    camera.position.fromArray(campus.manifest.spawn.position);
-    camera.position.y += Math.max(10, campus.size.y * .6);
+  if (mode === 'fly') {
+    flightFeet.fromArray(campus.manifest.spawn.position);
+    flightFeet.y += Math.max(10, campus.size.y * .6);
     pitch = -.20;
   }
+  updateTourView(0, 0, 0, true);
 }
 
 function setMode(next: Mode, destination?: CampusPoint) {
@@ -188,14 +208,26 @@ function setMode(next: Mode, destination?: CampusPoint) {
   }
   input.releaseAll();
   if (document.pointerLockElement === surface) document.exitPointerLock();
-  if (next === 'fly') directionFromCamera();
+  if (next === 'fly') {
+    if (previous === 'walk' && player) {
+      flightFeet.copy(player.position);
+    } else {
+      flightFeet.fromArray(campus.manifest.spawn.position);
+      flightFeet.y += Math.max(10, campus.size.y * .6);
+      yaw = campus.manifest.spawn.yaw ?? 0;
+      pitch = -.22;
+      avatarHeading = yaw - .42;
+    }
+  }
   mode = next;
   orbit.enabled = next === 'overview';
   if (next === 'overview') showOverview();
   if (next === 'walk' && player) {
     if (destination) resetFeet(destination);
     else {
-      const landing = previous === 'fly' ? landingQuery?.(camera.position) : undefined;
+      const landing = previous === 'fly'
+        ? landingQuery?.(point.copy(flightFeet).addScaledVector(camera.up, eyeHeight))
+        : undefined;
       if (landing) {
         player.teleport(landing);
         lastSafeFeet.copy(landing);
@@ -213,8 +245,8 @@ function setMode(next: Mode, destination?: CampusPoint) {
         }
       }
     }
-    updateWalkCamera();
   }
+  updateTourView(0, 0, 0, true);
   updateHud();
 }
 
@@ -225,10 +257,12 @@ function moveToLocation() {
     setMode('walk', choice);
   } else {
     setMode('fly');
-    camera.position.fromArray(choice.position);
-    camera.position.y += eyeHeight + 2;
+    flightFeet.fromArray(choice.position);
+    flightFeet.y += 2;
     yaw = choice.yaw ?? 0;
     pitch = choice.pitch ?? -.12;
+    avatarHeading = yaw - .42;
+    updateTourView(0, 0, 0, true);
   }
   locations.value = '';
   surface.focus({ preventScroll: true });
@@ -306,27 +340,39 @@ function resize() {
 }
 
 function moveFlat(dt: number) {
-  euler.set(pitch, yaw, 0, 'YXZ');
-  camera.quaternion.setFromEuler(euler);
   forward.set(-Math.sin(yaw), 0, -Math.cos(yaw));
   right.set(Math.cos(yaw), 0, -Math.sin(yaw));
   direction.copy(forward).multiplyScalar(input.ahead).addScaledVector(right, input.side);
   direction.clampLength(0, 1);
   if (mode === 'walk' && player) {
+    previousFeet.copy(player.position);
     player.update(dt, direction, input.running, input.jumping);
     if (player.grounded) lastSafeFeet.copy(player.position);
     if (campus && player.position.y < campus.bounds.min.y - 8) player.teleport(lastSafeFeet);
-    updateWalkCamera();
+    updateTourView(dt, updateAvatarHeading(player.position, dt));
     return;
   }
-  const speed = input.running ? 22 : 9;
-  camera.position.addScaledVector(direction, dt * speed);
-  camera.position.y += THREE.MathUtils.clamp(input.lift, -1, 1) * speed * dt;
   if (!campus) return;
+  previousFeet.copy(flightFeet);
+  const speed = input.running ? 22 : 9;
+  const lift = THREE.MathUtils.clamp(input.lift, -1, 1);
   const padding = Math.max(25, Math.max(campus.size.x, campus.size.z) * .4);
-  camera.position.x = THREE.MathUtils.clamp(camera.position.x, campus.bounds.min.x - padding, campus.bounds.max.x + padding);
-  camera.position.z = THREE.MathUtils.clamp(camera.position.z, campus.bounds.min.z - padding, campus.bounds.max.z + padding);
-  camera.position.y = THREE.MathUtils.clamp(camera.position.y, campus.bounds.min.y + .8, campus.bounds.max.y + padding * 2);
+  flightGoal.copy(flightFeet).addScaledVector(direction, dt * speed);
+  flightGoal.x = THREE.MathUtils.clamp(flightGoal.x, campus.bounds.min.x - padding, campus.bounds.max.x + padding);
+  flightGoal.z = THREE.MathUtils.clamp(flightGoal.z, campus.bounds.min.z - padding, campus.bounds.max.z + padding);
+  flightFeet.copy(player?.constrainFlight(flightFeet, flightGoal) ?? flightGoal);
+  flightGoal.copy(flightFeet);
+  flightGoal.y = THREE.MathUtils.clamp(flightGoal.y + lift * speed * dt, campus.bounds.min.y + .02, campus.bounds.max.y + padding * 2);
+  flightFeet.copy(player?.constrainFlight(flightFeet, flightGoal) ?? flightGoal);
+  updateTourView(dt, updateAvatarHeading(flightFeet, dt), lift);
+}
+
+function updateAvatarHeading(feet: THREE.Vector3, dt: number) {
+  const dx = feet.x - previousFeet.x;
+  const dz = feet.z - previousFeet.z;
+  const speed = dt > 0 ? Math.hypot(dx, dz) / dt : 0;
+  if (speed > .08) avatarHeading = Math.atan2(-dx, -dz);
+  return speed;
 }
 
 function moveXR(dt: number, frame?: XRFrame) {
@@ -359,18 +405,19 @@ async function enterVR() {
     setMode('walk');
     xrSession = session;
     input.releaseAll();
+    tourAvatar.object.visible = false;
+    updateHud();
     rig.position.copy(player.position);
     rig.rotation.y = yaw;
-    lastOrientation.copy(camera.quaternion);
     camera.position.set(0, 0, 0);
     camera.quaternion.identity();
     session.addEventListener('end', () => {
       xrSession = undefined;
       rig.position.set(0, 0, 0);
       rig.rotation.y = 0;
-      camera.quaternion.copy(lastOrientation);
-      updateWalkCamera();
+      updateTourView(0, 0, 0, true);
       vr.disabled = false;
+      updateHud();
       queueMicrotask(resize);
     }, { once: true });
     await renderer.xr.setSession(session);
@@ -395,7 +442,10 @@ function frame(time: number, xrFrame?: XRFrame) {
   if (debug) {
     const coords = camera.position.toArray().map(value => value.toFixed(2)).join(', ');
     const { calls, triangles } = renderer.info.render;
-    diagnostics.textContent = `${mode}${mode === 'walk' && player?.grounded ? ' grounded' : ''}\n${coords}\n${calls} draws · ${triangles.toLocaleString()} tris\nheading ${yaw.toFixed(3)}`;
+    const feet = mode === 'fly' ? flightFeet : player?.position;
+    const avatarCoords = feet?.toArray().map(value => value.toFixed(2)).join(', ') ?? '—';
+    const view = mode === 'overview' ? 'overview' : tourAvatar.object.visible ? 'follow' : 'eyes';
+    diagnostics.textContent = `${mode}${mode === 'walk' && player?.grounded ? ' grounded' : ''}\n${coords}\n${calls} draws · ${triangles.toLocaleString()} tris\nheading ${yaw.toFixed(3)}\navatar ${avatarCoords}\nview ${view}`;
   }
 }
 
@@ -484,6 +534,20 @@ for (const button of modeButtons) {
     surface.focus({ preventScroll: true });
   });
 }
+for (const button of avatarButtons) {
+  button.addEventListener('click', () => {
+    selectedAvatar = button.dataset.avatar === 'xiaoxiao' ? 'xiaoxiao' : 'taoqi';
+    tourAvatar.select(selectedAvatar);
+    updateHud();
+    surface.focus({ preventScroll: true });
+  });
+}
+viewToggle.addEventListener('click', () => {
+  firstPerson = !firstPerson;
+  updateTourView(0, 0, 0, true);
+  updateHud();
+  surface.focus({ preventScroll: true });
+});
 reset.addEventListener('click', () => {
   resetView();
   surface.focus({ preventScroll: true });
@@ -512,6 +576,7 @@ get('retry').addEventListener('click', () => window.location.reload());
 window.addEventListener('pagehide', event => {
   if (event.persisted) return;
   player?.dispose();
+  tourAvatar.dispose();
   orbit.dispose();
   if (!renderer) return;
   renderer.setAnimationLoop(null);

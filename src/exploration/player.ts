@@ -51,6 +51,8 @@ export interface PlayerController {
   teleport(feet: THREE.Vector3): void;
   /** Shorten a third-person camera arm against the static environment. */
   constrainCamera(target: THREE.Vector3, desired: THREE.Vector3): THREE.Vector3;
+  /** Sweep the airborne avatar to the closest reachable position. */
+  constrainFlight(fromFeet: THREE.Vector3, desiredFeet: THREE.Vector3): THREE.Vector3;
   dispose(): void;
 }
 
@@ -225,8 +227,12 @@ export async function createPlayerController(
   const velocity = new THREE.Vector3();
   const targetVelocity = new THREE.Vector3();
   const displacement = new THREE.Vector3();
-  const cameraDirection = new THREE.Vector3();
-  const constrainedCamera = new THREE.Vector3();
+  const sweepDirection = new THREE.Vector3();
+  const sweepResult = new THREE.Vector3();
+  const flightCenter = new THREE.Vector3();
+  const constrainedFlightCenter = new THREE.Vector3();
+  const cameraBall = new RAPIER.Ball(0.16);
+  const unrotated = { x: 0, y: 0, z: 0, w: 1 };
   let accumulator = 0;
   let verticalSpeed = 0;
   let grounded = false;
@@ -295,6 +301,19 @@ export async function createPlayerController(
       placeFeet(safeFeet); velocity.set(0, 0, 0); verticalSpeed = 0;
       grounded = false; sprintEvidenceRemaining = 0;
     }
+  };
+
+  const sweep = (from: THREE.Vector3, to: THREE.Vector3, shape: RAPIER.Shape) => {
+    sweepResult.copy(to);
+    if (disposed) return sweepResult;
+    sweepDirection.subVectors(to, from);
+    const length = sweepDirection.length();
+    if (length < 0.0001) return sweepResult;
+    sweepDirection.divideScalar(length);
+    const hit = world.castShape(from, unrotated, sweepDirection, shape, .005, length, true,
+      RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, undefined, collider, driving ? vehicles.bodyFor(driving.id) : undefined);
+    if (hit) sweepResult.copy(from).addScaledVector(sweepDirection, Math.max(0, hit.time_of_impact - .01));
+    return sweepResult;
   };
 
   return {
@@ -534,19 +553,16 @@ export async function createPlayerController(
       syncPosition();
     },
     constrainCamera(target, desired) {
-      constrainedCamera.copy(desired);
-      if (disposed) return constrainedCamera;
-      cameraDirection.subVectors(desired, target);
-      const distance = cameraDirection.length();
-      if (distance < 0.001) return constrainedCamera;
-      cameraDirection.divideScalar(distance);
-      const ray = new RAPIER.Ray(target, cameraDirection);
-      const hit = world.castRay(ray, distance, true, undefined, undefined, collider, driving ? vehicles.bodyFor(driving.id) : undefined);
-      if (hit) {
-        const cameraDistance = Math.min(distance, Math.max(0.35, hit.timeOfImpact - 0.18));
-        constrainedCamera.copy(target).addScaledVector(cameraDirection, cameraDistance);
-      }
-      return constrainedCamera;
+      return sweep(target, desired, cameraBall);
+    },
+    constrainFlight(fromFeet, desiredFeet) {
+      flightCenter.copy(fromFeet);
+      flightCenter.y += CHARACTER_HALF_HEIGHT;
+      const desiredCenter = constrainedFlightCenter.copy(desiredFeet);
+      desiredCenter.y += CHARACTER_HALF_HEIGHT;
+      const result = sweep(flightCenter, desiredCenter, capsuleShape);
+      result.y -= CHARACTER_HALF_HEIGHT;
+      return result;
     },
     dispose() {
       if (disposed) return;
