@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { loadCampus, type CampusPoint } from './campus.ts';
+import { createCampusGroundReflection } from './campus-ground.ts';
 import { createCampusLighting } from './campus-lighting.ts';
 import { createCampusRenderer } from './campus-render.ts';
 import { createInput, type Mode } from './input.ts';
@@ -31,6 +32,7 @@ const diagnostics = get('diagnostics');
 const query = new URLSearchParams(window.location.search);
 const debug = query.has('debug');
 const contactOcclusion = !debug || query.get('occlusion') !== '0';
+const groundReflections = !debug || query.get('reflection') !== '0';
 const forward = new THREE.Vector3();
 const right = new THREE.Vector3();
 const direction = new THREE.Vector3();
@@ -48,6 +50,7 @@ let player: PlayerController | undefined;
 let landingQuery: ReturnType<typeof createLandingQuery> | undefined;
 let renderer: THREE.WebGLRenderer;
 let lighting: ReturnType<typeof createCampusLighting> | undefined;
+let pavement: ReturnType<typeof createCampusGroundReflection> | undefined;
 let campusRenderer: ReturnType<typeof createCampusRenderer>;
 let yaw = 0;
 let pitch = 0;
@@ -401,6 +404,7 @@ function frame(time: number, xrFrame?: XRFrame) {
   const feet = mode === 'walk' ? player?.position : mode === 'fly' ? flightFeet : undefined;
   const ground = feet && tourAvatar.object.visible ? player?.groundSurface(feet) : undefined;
   lighting?.update(mode, feet, ground);
+  pavement?.update(camera, time, finished && mode === 'walk');
   if (finished && mode !== 'overview' && !input.touch && !renderer.xr.isPresenting && campusRenderer) {
     campusRenderer.render(scene, camera);
   } else {
@@ -411,7 +415,7 @@ function frame(time: number, xrFrame?: XRFrame) {
     const { calls, triangles } = renderer.info.render;
     const avatarCoords = (mode === 'overview' ? player?.position : feet)?.toArray().map(value => value.toFixed(2)).join(', ') ?? '—';
     const view = mode === 'overview' ? 'overview' : tourAvatar.object.visible ? 'follow' : 'eyes';
-    diagnostics.textContent = `${mode}${mode === 'walk' && player?.grounded ? ' grounded' : ''}\n${coords}\n${calls} draws · ${triangles.toLocaleString()} tris\nheading ${yaw.toFixed(3)}\navatar ${avatarCoords}\nview ${view}`;
+    diagnostics.textContent = `${mode}${mode === 'walk' && player?.grounded ? ' grounded' : ''}\n${coords}\n${calls} draws · ${triangles.toLocaleString()} tris\nheading ${yaw.toFixed(3)}\navatar ${avatarCoords}\nview ${view}\nmirror ${pavement?.active ? 'on' : 'off'} · ${pavement?.passes ?? 0} captures`;
   }
 }
 
@@ -463,6 +467,7 @@ async function initialize() {
     campus = await loadCampus();
     scene.add(campus.visuals);
     lighting = createCampusLighting(scene, camera, renderer, campus, input.touch);
+    pavement = createCampusGroundReflection(renderer, scene, campus.visuals, groundReflections && !input.touch);
     showOverview();
     configureInfo(campus.manifest, campus.manifestURL);
     if (campus.collision.children.length) {
@@ -548,6 +553,7 @@ window.addEventListener('pagehide', event => {
   if (event.persisted) return;
   player?.dispose();
   lighting?.dispose();
+  pavement?.dispose();
   campusRenderer?.dispose();
   tourAvatar.dispose();
   orbit.dispose();

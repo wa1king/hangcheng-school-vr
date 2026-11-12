@@ -6,7 +6,7 @@ import type { Mode } from './input.ts';
 type Campus = Awaited<ReturnType<typeof loadCampus>>;
 type Surface = { y: number; normal: { x: number; y: number; z: number } };
 
-const sunDirection = new THREE.Vector3(-0.62, 0.69, 0.38).normalize();
+const sunDirection = new THREE.Vector3(-0.69, 0.55, 0.47).normalize();
 const haze = new THREE.Color('#bed0d9');
 const zenith = new THREE.Color('#568bc6');
 
@@ -53,7 +53,7 @@ function createSky(radius: number) {
         float elevation = max(0.0, dir.y);
         vec3 color = mix(uHorizon, uZenith, pow(smoothstep(-0.026, 0.86, dir.y), 0.71));
         float solar = max(0.0, dot(dir, uSun));
-        color = mix(color, vec3(0.91, 0.88, 0.81), 0.22 * pow(solar, 9.0));
+        color = mix(color, vec3(0.94, 0.88, 0.77), 0.28 * pow(solar, 9.0));
         if (elevation > 0.048) {
           vec2 p = dir.xz * vec2(2.38, 3.42) / (elevation + 0.108) + vec2(6.0, -1.0);
           float coverage = cloudDensity(p);
@@ -118,6 +118,190 @@ function createSkyReflection() {
   texture.magFilter = THREE.LinearFilter;
   texture.needsUpdate = true;
   return texture;
+}
+
+const localReflectionShader = /* glsl */`
+  varying vec3 vCampusProbePosition;
+  uniform samplerCube uCampusEntryProbe;
+  uniform samplerCube uCampusCourtProbe;
+  uniform vec3 uCampusEntryProbeCenter;
+  uniform vec3 uCampusCourtProbeCenter;
+  uniform vec2 uCampusProbeActive;
+  uniform float uCampusProbeStrength;
+
+  vec3 campusProbeSample(vec3 direction, float roughness, vec3 sky) {
+    vec3 entryOffset = vCampusProbePosition - uCampusEntryProbeCenter;
+    vec3 courtOffset = vCampusProbePosition - uCampusCourtProbeCenter;
+    float entryWeight = (1.0 - smoothstep(22.0, 47.0, length(entryOffset))) * uCampusProbeActive.x;
+    float courtWeight = (1.0 - smoothstep(16.0, 44.0, length(courtOffset))) * uCampusProbeActive.y;
+    float total = entryWeight + courtWeight;
+    if (total < 0.001) return sky;
+
+    float lod = clamp(roughness * 7.0, 0.0, 5.0);
+    vec3 reflected = vec3(0.0);
+    // Shift the lookup direction as the window moves away from the capture center.
+    if (entryWeight > 0.001) {
+      vec3 entryRay = normalize(direction + entryOffset * 0.025);
+      reflected += textureLod(uCampusEntryProbe, entryRay, lod).rgb * entryWeight;
+    }
+    if (courtWeight > 0.001) {
+      vec3 courtRay = normalize(direction + courtOffset * 0.036);
+      reflected += textureLod(uCampusCourtProbe, courtRay, lod).rgb * courtWeight;
+    }
+    return mix(sky, reflected / total, min(1.0, total) * uCampusProbeStrength);
+  }
+`;
+
+function createLocalReflections(
+  renderer: THREE.WebGLRenderer, campus: Campus, scene: THREE.Scene, sky: THREE.Mesh,
+  backdrop: THREE.Mesh, fill: THREE.HemisphereLight, bounce: THREE.AmbientLight, sun: THREE.DirectionalLight,
+) {
+  const gate = campus.manifest.locations?.find(location => location.id === 'gate');
+  const court = campus.manifest.locations?.find(location => location.id === 'courtyard');
+  if (!gate || !court || !renderer.extensions.has('EXT_color_buffer_float')) return;
+  const courtCenter = new THREE.Vector3().fromArray(court.position).add(new THREE.Vector3(0, 5.2, 0));
+  const gateCenter = new THREE.Vector3().fromArray(gate.position).lerp(courtCenter, .41);
+  gateCenter.y = gate.position[1] + 5.1;
+  const centers = [gateCenter, courtCenter];
+  const targets = centers.map(() => new THREE.WebGLCubeRenderTarget(128, {
+    type: THREE.HalfFloatType,
+    generateMipmaps: true,
+    minFilter: THREE.LinearMipmapLinearFilter,
+  }));
+  const active = new THREE.Vector2();
+  const baked = new THREE.Vector2();
+  const uniforms = {
+    uCampusEntryProbe: { value: targets[0].texture },
+    uCampusCourtProbe: { value: targets[1].texture },
+    uCampusEntryProbeCenter: { value: gateCenter },
+    uCampusCourtProbeCenter: { value: courtCenter },
+    uCampusProbeActive: { value: active },
+  };
+
+  function register(material: THREE.MeshStandardMaterial, glass: boolean, clear: boolean) {
+    const compile = material.onBeforeCompile;
+    const programKey = material.customProgramCacheKey();
+    const probeStrength = { value: glass ? .88 : .65 };
+    material.onBeforeCompile = (shader, webgl) => {
+      compile.call(material, shader, webgl);
+      Object.assign(shader.uniforms, uniforms, { uCampusProbeStrength: probeStrength });
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vCampusProbePosition;')
+        .replace('#include <project_vertex>', `
+          #include <project_vertex>
+          vCampusProbePosition = (modelMatrix * vec4(transformed, 1.0)).xyz;
+        `);
+      const lighting = THREE.ShaderChunk.envmap_physical_pars_fragment.replace(
+        'return envMapColor.rgb * envMapIntensity;',
+        'return campusProbeSample(reflectVec, roughness, envMapColor.rgb) * envMapIntensity;',
+      );
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>\n${localReflectionShader}`)
+        .replace('#include <envmap_physical_pars_fragment>', lighting);
+      if (clear) shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>', `
+        float faceOn = clamp(dot(normalize(vViewPosition), normal), 0.0, 1.0);
+        diffuseColor.a *= mix(0.67, 1.43, pow(1.0 - faceOn, 4.0));
+        #include <opaque_fragment>
+      `);
+    };
+    material.customProgramCacheKey = () => `${programKey}|campus-probe-${clear ? 'clear' : 'opaque'}`;
+  }
+
+  function bake(index: number) {
+    const center = centers[index];
+    const capture = new THREE.Scene();
+    capture.background = scene.background;
+    capture.fog = scene.fog;
+    const geometry = campus.visuals.clone(true);
+    const copies = new Map<THREE.Material, THREE.Material>();
+    geometry.traverse(object => {
+      if (!(object instanceof THREE.Mesh)) return;
+      const passive = (source: THREE.Material) => {
+        let material = copies.get(source);
+        if (!material) {
+          material = source.clone();
+          material.visible = source.visible && !source.transparent;
+          if (material instanceof THREE.MeshStandardMaterial) material.envMap = null;
+          copies.set(source, material);
+        }
+        return material;
+      };
+      object.material = Array.isArray(object.material) ? object.material.map(passive) : passive(object.material);
+    });
+    const captureSky = sky.clone();
+    captureSky.position.copy(center);
+    const captureSun = sun.clone();
+    captureSun.target.position.copy(center);
+    captureSun.position.copy(center).addScaledVector(sunDirection, 120);
+    captureSun.shadow.mapSize.set(512, 512);
+    captureSun.shadow.bias = -.0002;
+    captureSun.shadow.normalBias = .04;
+    Object.assign(captureSun.shadow.camera, { left: -48, right: 48, top: 48, bottom: -48, near: 55, far: 185 });
+    captureSun.shadow.camera.updateProjectionMatrix();
+    capture.add(geometry, captureSky, backdrop.clone(), fill.clone(), bounce.clone(), captureSun, captureSun.target);
+    const camera = new THREE.CubeCamera(.2, 840, targets[index]);
+    camera.position.copy(center);
+    const target = renderer.getRenderTarget();
+    const face = renderer.getActiveCubeFace();
+    const mip = renderer.getActiveMipmapLevel();
+    const xr = renderer.xr.enabled;
+    const shadowAuto = renderer.shadowMap.autoUpdate;
+    const shadowNeedsUpdate = renderer.shadowMap.needsUpdate;
+    try {
+      renderer.shadowMap.autoUpdate = false;
+      renderer.shadowMap.needsUpdate = true;
+      camera.update(renderer, capture);
+      baked.setComponent(index, 1);
+    } finally {
+      renderer.setRenderTarget(target, face, mip);
+      renderer.xr.enabled = xr;
+      renderer.shadowMap.autoUpdate = shadowAuto;
+      renderer.shadowMap.needsUpdate = shadowNeedsUpdate;
+      captureSun.shadow.dispose();
+      for (const material of copies.values()) material.dispose();
+    }
+  }
+
+  let frame = 0;
+  let next = 0;
+  let pending = 0;
+  function resetAfterContextRestore() {
+    window.clearTimeout(pending);
+    pending = 0;
+    frame = 0;
+    next = 0;
+    active.set(0, 0);
+    baked.set(0, 0);
+  }
+  renderer.domElement.addEventListener('webglcontextrestored', resetAfterContextRestore);
+
+  function update(walking: boolean) {
+    active.copy(baked).multiplyScalar(renderer.xr.isPresenting ? 0 : 1);
+    if (next >= targets.length || pending || !walking || renderer.xr.isPresenting) return;
+    // Let the first playable frame arrive before each one-time capture.
+    if (++frame < 16) return;
+    frame = 0;
+    pending = window.setTimeout(() => {
+      pending = 0;
+      if (renderer.xr.isPresenting || renderer.getContext().isContextLost()) return;
+      try {
+        bake(next++);
+      } catch (error) {
+        // Materials keep their sky reflections if a driver cannot render the probe.
+        console.warn('校园局部反射未能生成', error);
+      }
+    }, 0);
+  }
+
+  return {
+    register,
+    update,
+    dispose() {
+      window.clearTimeout(pending);
+      renderer.domElement.removeEventListener('webglcontextrestored', resetAfterContextRestore);
+      for (const target of targets) target.dispose();
+    },
+  };
 }
 
 /** Find the centers of the actual lamp boxes in the merged campus model. */
@@ -206,7 +390,7 @@ export function createCampusLighting(
   scene: THREE.Scene, camera: THREE.PerspectiveCamera, renderer: THREE.WebGLRenderer, campus: Campus, mobile: boolean,
 ) {
   const span = Math.max(campus.size.x, campus.size.z, 30);
-  scene.fog = new THREE.Fog(haze, span * 0.64, span * 3.5);
+  scene.fog = new THREE.Fog(haze, span * 0.46, span * 2.75);
   camera.far = Math.max(600, span * 8);
   camera.updateProjectionMatrix();
   const sky = createSky(camera.far * 0.8);
@@ -217,9 +401,9 @@ export function createCampusLighting(
   );
   backdrop.rotation.x = -Math.PI / 2;
   backdrop.position.set(campus.center.x, campus.bounds.min.y - 0.36, campus.center.z);
-  const skyLight = new THREE.HemisphereLight('#dceaff', '#c7beaa', 1.14);
-  const reflectedLight = new THREE.AmbientLight('#eae6dc', 0.11);
-  const sun = new THREE.DirectionalLight('#fff2dc', 3.43);
+  const skyLight = new THREE.HemisphereLight('#dbeaff', '#c7beaa', 0.95);
+  const reflectedLight = new THREE.AmbientLight('#eae6dc', 0.14);
+  const sun = new THREE.DirectionalLight('#fff0d7', 3.71);
   const sunOffset = sunDirection.clone().multiplyScalar(span * 1.30);
   sun.castShadow = true;
   const mapSize = mobile ? 1024 : 2048;
@@ -231,6 +415,10 @@ export function createCampusLighting(
   const fixtures: THREE.Vector3[] = [];
   const roomLights = [new THREE.PointLight('#fff0d8', 0, 5.2, 2), new THREE.PointLight('#fff0d8', 0, 5.2, 2)];
   scene.add(sky, backdrop, skyLight, reflectedLight, sun, sun.target, blob, ...roomLights);
+  const query = new URLSearchParams(window.location.search);
+  const localReflections = !mobile && !(query.has('debug') && query.get('probe') === '0')
+    ? createLocalReflections(renderer, campus, scene, sky, backdrop, skyLight, reflectedLight, sun)
+    : undefined;
   if (campus.manifest.collisionFromModels) campus.collision.add(backdrop.clone());
   campus.visuals.updateMatrixWorld(true);
   const updated = new Set<THREE.Material>();
@@ -251,10 +439,13 @@ export function createCampusLighting(
         material.envMapIntensity = material.name === 'glass-clear' ? 1.42 : 1.02;
         material.roughness = Math.min(material.roughness, 0.25);
         if (material.name !== 'glass-clear') material.metalness = Math.max(material.metalness, 0.11);
-      } else if (['teaching-metal', 'frame', 'blue-rail', 'blue-cap', 'stand_steel', 'entry-aluminum', 'stainless'].includes(material.name)) {
+        localReflections?.register(material, true, material.name === 'glass-clear');
+      } else if (['teaching-metal', 'frame', 'blue-rail', 'blue-cap', 'stand_steel', 'entry-aluminum',
+        'stainless', 'entry-drain-frame', 'entry-drain-grate'].includes(material.name)) {
         material.envMap = reflection;
         material.envMapIntensity = 0.48;
         material.metalness = Math.max(material.metalness, 0.27);
+        localReflections?.register(material, false, false);
       } else if (material.name === 'teaching-floor') {
         material.envMap = reflection;
         material.envMapIntensity = 0.22;
@@ -298,6 +489,7 @@ export function createCampusLighting(
 
   function update(mode: Mode, feet?: THREE.Vector3, surface?: Surface) {
     camera.getWorldPosition(sky.position);
+    localReflections?.update(mode !== 'overview');
     updateFixtures(mode === 'walk' ? feet : undefined);
     const local = feet && (mode === 'walk' || (mode === 'fly' && feet.y < campus.bounds.max.y + 14));
     const radius = local ? (mode === 'walk' ? 25 : 38) : Math.max(campus.size.length() * 0.56, 25);
@@ -341,6 +533,7 @@ export function createCampusLighting(
         mesh.material.dispose();
       }
       blob.material.alphaMap?.dispose();
+      localReflections?.dispose();
       reflection.dispose();
       sun.shadow.dispose();
       skyLight.removeFromParent();
