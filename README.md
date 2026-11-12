@@ -22,6 +22,8 @@
 
 `tools/build_campus.py` 生成校舍 `campus.glb` 和周边街区 `surroundings.glb`。重新生成时需要 Python 3.11 或以上、NumPy、Pillow、Shapely、Mapbox Earcut 和 Windows 字体。分别使用 `npx gltfpack@1.3.0 -i public/scene/campus.glb -o public/scene/campus.packed.glb -cc -vpf -vp 16 -vt 16 -vn 10 -kn -km -ke`（周边模型替换文件名）压缩后，用压缩版替换对应的原始文件。校内渲染和碰撞读取同一份几何，教室窗玻璃双面可见且有碰撞。周边街区在首帧后加载，仅供观看。构建后将 `dist` 内容更新到 `docs` 并保留 `.nojekyll`。
 
+各类立面的开间、窗台和窗楣高度、分格数记录在 `tools/facade_panels.json`，`tools/facade_kit.py` 据此为普通墙面成套生成壁柱、层间腰线、窗台、遮阳窗楣、勒脚、散水、雨水管、雨水口和空调外机，窗玻璃贴图带窗帘、灯管和课桌。样本里 `basis` 为 `inferred` 的构件是深圳校舍的常见做法，尚未逐面与照片核对，把对应项改为 `null` 即可关闭。
+
 更新场景模型或主光后，运行 `node tools/bake-campus-light.mjs` 重新生成 `public/scene/campus-baked-light.bin`。它按 `scene.json` 对应的模型版本生成，浏览器在首帧后加载。
 
 ## 数据与署名

@@ -11,6 +11,7 @@ from shapely.geometry import LineString, Point, Polygon, box
 from shapely.geometry.polygon import orient
 from shapely.ops import unary_union
 
+from facade_kit import FACADES, condenser, dress_span, window_trim
 from mesh import rect, rounded
 from street_trees import street_tree
 
@@ -210,7 +211,10 @@ def position(a, b, fraction, inset=0):
 
 
 def window_opening(mesh, a, b, bottom, top, depth, glazing, divisions, solid_frame=False):
-    """Cut a visible recess between the outer wall and the window assembly."""
+    """Cut a visible recess between the outer wall and the window assembly.
+
+    A list of glazing materials splits the pane into equal lengths, one room each.
+    """
     back_a, back_b = position(a, b, 0, depth), position(a, b, 1, depth)
 
     def vertex(p, y):
@@ -222,7 +226,10 @@ def window_opening(mesh, a, b, bottom, top, depth, glazing, divisions, solid_fra
     mesh.face('reveal', [vertex(a, bottom), vertex(a, top), vertex(back_a, top), vertex(back_a, bottom)])
     mesh.face('reveal', [vertex(b, top), vertex(b, bottom), vertex(back_b, bottom), vertex(back_b, top)])
     height = top - bottom
-    line_rect(mesh, glazing, back_a, back_b, bottom, height, uv=OUTWARD_UV)
+    panes = [glazing] if isinstance(glazing, str) else glazing
+    for index, pane in enumerate(panes):
+        line_rect(mesh, pane, position(back_a, back_b, index / len(panes)),
+                  position(back_a, back_b, (index + 1) / len(panes)), bottom, height, uv=OUTWARD_UV)
     rail_a, rail_b = position(a, b, 0, depth - 0.023), position(a, b, 1, depth - 0.023)
     def frame(left, right, y, h):
         if solid_frame:
@@ -244,17 +251,13 @@ def panels(mesh, a, b, floor, count, inset, mode, seed, floor_height=4.02):
     rng = random.Random(seed)
     length = math.dist(a, b)
     height = min(3.95, floor_height)
-    if mode == 'fins':
-        front, depth, low, high, divisions = 0.03, 0.32, 0.42, min(2.98, height - 0.2), 1
-    elif mode == 'corridor':
-        front, depth, low, high, divisions = inset - 0.24, 0.215, 0.92, 2.66, 3
-    elif mode == 'terracotta':
-        front, depth, low, high, divisions = 0.025, 0.25, 0.82, 2.65, 3
-    elif mode == 'classroom':
-        front, depth, low, high, divisions = 0.065, 0.29, 0.88, 2.72, 3
-    else:
-        # The upper hall is a solid volume, so its frames sit in front of the wall.
-        front, depth, low, high, divisions = -0.11, 0.08, 0.92, 2.67, 3
+    # Proportions come from the facade samples. The upper hall is a solid
+    # volume, so its frames sit in front of the wall.
+    spec = FACADES[mode]
+    front = spec['front'] if 'front' in spec else inset - spec['front_behind_gallery']
+    depth, low, divisions = spec['recess'], spec['sill_height'], spec['divisions']
+    high = min(spec['head_height'], height - 0.2)
+    ac = (spec.get('trim') or {}).get('ac')
     for bay in range(count):
         bay_a, bay_b = position(a, b, bay / count, front), position(a, b, (bay + 1) / count, front)
         if mode == 'corridor' and bay % 3 == 1:
@@ -270,28 +273,36 @@ def panels(mesh, a, b, floor, count, inset, mode, seed, floor_height=4.02):
         group_gap = 0.11 if mode == 'fins' else 0
         left = position(bay_a, bay_b, edge + (group_gap if bay % 5 == 0 else 0))
         right = position(bay_a, bay_b, 1 - edge - (group_gap if (bay + 1) % 5 == 0 else 0))
-        glazing = rng.choice(('glass-dusk', 'glass-dusk', 'glass-light', 'glass-deep'))
-        material = 'terra' if mode == 'terracotta' else 'beige'
+        glazing = rng.choice(spec['glazing'])
+        material = spec.get('pier_material', 'beige')
         if mode != 'windows':
             line_rect(mesh, material, bay_a, bay_b, floor, low)
             line_rect(mesh, 'beige', bay_a, bay_b, floor + high, floor_height - high)
             line_rect(mesh, material, bay_a, left, floor + low, high - low)
             line_rect(mesh, 'beige', right, bay_b, floor + low, high - low)
         window_opening(mesh, left, right, floor + low, floor + high, depth, glazing, divisions)
+        window_trim(mesh, spec, left, right, floor + low, floor + high)
+        if ac and floor >= ac['from_floor'] * floor_height - .01 and rng.random() < ac['rate']:
+            condenser(mesh, left, right, floor + low, rng)
         if mode == 'fins':
             mesh.strip('cream', bay_a, left, 0.20, floor + 0.18, height - 0.36)
 
 
-def ribbon_windows(mesh, a, b, floor, floor_height=3.46):
+def ribbon_windows(mesh, a, b, floor, floor_height=3.46, seed=0):
+    spec = FACADES['ribbon']
+    front = spec['front']
     length = math.dist(a, b)
     gap = min(0.085 / length, 0.18)
-    left, right = position(a, b, gap, 0.12), position(a, b, 1 - gap, 0.12)
-    low, high = 0.78, 2.64
-    line_rect(mesh, 'beige', a, b, floor, low, 0.12)
-    line_rect(mesh, 'beige', a, b, floor + high, floor_height - high, 0.12)
-    line_rect(mesh, 'beige', position(a, b, 0, 0.12), left, floor + low, high - low)
-    line_rect(mesh, 'beige', right, position(a, b, 1, 0.12), floor + low, high - low)
-    window_opening(mesh, left, right, floor + low, floor + high, 0.22, 'glass-ribbon', max(1, round(length / 0.72)))
+    left, right = position(a, b, gap, front), position(a, b, 1 - gap, front)
+    low, high = spec['sill_height'], spec['head_height']
+    line_rect(mesh, 'beige', a, b, floor, low, front)
+    line_rect(mesh, 'beige', a, b, floor + high, floor_height - high, front)
+    line_rect(mesh, 'beige', position(a, b, 0, front), left, floor + low, high - low)
+    line_rect(mesh, 'beige', right, position(a, b, 1, front), floor + low, high - low)
+    rng = random.Random(seed)
+    rooms = [rng.choice(spec['glazing']) for _ in range(max(1, round(length / spec['bay_width'])))]
+    window_opening(mesh, left, right, floor + low, floor + high, spec['recess'], rooms, max(1, round(length / 0.72)))
+    window_trim(mesh, spec, left, right, floor + low, floor + high)
 
 
 def corridor_rail(mesh, a, b, y):
@@ -537,6 +548,9 @@ def building(mesh, footprint, ident, floors, floor_height):
     slab(mesh, roof, total - 0.55, total + 0.05, 'beige', 'roof', 'soffit')
     parapet = poly.difference(poly.buffer(-0.18, join_style='mitre'))
     slab(mesh, parapet, total + 0.05, total + 0.84, 'beige', 'cream')
+    # A coping with a small overhang throws a shadow line along every roof edge.
+    coping = poly.buffer(0.045, join_style='mitre').difference(poly.buffer(-0.225, join_style='mitre'))
+    slab(mesh, coping, total + 0.84, total + 0.895, 'cream')
 
     if main_building:
         upper = poly.intersection(box(-30, -43, 79, -17.9))
@@ -576,11 +590,19 @@ def building(mesh, footprint, ident, floors, floor_height):
             span = math.dist(start, stop)
             if indoor or span < .02:
                 continue
+            seed = ident + k * 117
             if mode == 'ribbon':
                 line_rect(mesh, 'beige', start, stop, 0, floor_height, 0.12)
                 for floor in range(1, floors):
-                    ribbon_windows(mesh, start, stop, floor * floor_height, floor_height)
+                    ribbon_windows(mesh, start, stop, floor * floor_height, floor_height, seed + floor)
+                if span > 2.2:
+                    dress_span(mesh, mode, start, stop, max(1, round(span / FACADES[mode]['bay_width'])),
+                               floors, floor_height, seed)
                 continue
+            if span > 2.2:
+                # Piers, bands and pipes follow the bay rhythm of the upper floors.
+                dress_span(mesh, mode, start, stop, max(1, round(span / FACADES[mode]['bay_width'])),
+                           floors, floor_height, seed, ground_open=arcade or over_entry)
             for floor in range(floors):
                 if floor == 0 and arcade:
                     ground_arcade(mesh, start, stop, floor_height)
@@ -591,8 +613,7 @@ def building(mesh, footprint, ident, floors, floor_height):
                 visible_mode = 'classroom' if floor == 0 and mode in ('fins', 'corridor') else mode
                 inset = gallery_depth if visible_mode == 'corridor' else 0.12
                 if span > 2.2:
-                    bay_width = {'fins': 1.32, 'corridor': 4.1, 'classroom': 4.5, 'terracotta': 3.85}[visible_mode]
-                    count = max(1, round(span / bay_width))
+                    count = max(1, round(span / FACADES[visible_mode]['bay_width']))
                     panels(mesh, start, stop, y, count, inset, visible_mode, ident + k * 117 + floor, floor_height)
                 elif visible_mode == 'corridor':
                     line_rect(mesh, 'beige', start, stop, y, floor_height - 0.04, inset - 0.20)

@@ -20,6 +20,7 @@ from architecture import building, entrance, materials, slab
 from campus_perimeter import add_perimeter
 from classroom_campus import add_reference_structures
 from entry_details import STAIR_CENTER, add_entry_details, entry_drain_opening
+from facade_kit import register_facade_materials
 from entry_greenery import detailed_tree, register_greenery
 from street_trees import register_street_trees, street_tree
 from interiors import PORTAL_Z
@@ -183,6 +184,7 @@ def main(target=BASE / 'public' / 'scene'):
     polygons, lines = read_data()
     visual = Mesh(site_to_world)
     materials(visual)
+    register_facade_materials(visual)
     register_greenery(visual)
     register_street_trees(visual)
     landscape(visual, polygons, lines)

@@ -1,0 +1,110 @@
+{
+  "note": "航城学校立面样本。每类立面记录开间、窗洞比例和成套附属构件。basis 为 photo 的数值来自公开照片比对，为 inferred 的构件是深圳中小学校舍的常见做法，尚未逐面核对，照片不符时把对应项设为 null 即可关闭。长度单位为米。",
+  "types": {
+    "classroom": {
+      "label": "浅色面砖教室外墙",
+      "basis": "photo",
+      "bay_width": 4.5,
+      "front": 0.065,
+      "recess": 0.29,
+      "sill_height": 0.88,
+      "head_height": 2.72,
+      "divisions": 3,
+      "glazing": ["glass-room-0", "glass-room-1", "glass-room-2", "glass-room-3", "glass-room-4", "glass-room-5"],
+      "trim": {
+        "basis": "inferred",
+        "sill": {"projection": 0.07, "thickness": 0.06, "overhang": 0.06},
+        "eyebrow": {"projection": 0.16, "thickness": 0.08, "overhang": 0.10},
+        "pilaster": {"width": 0.36, "projection": 0.08, "material": "cream"},
+        "band": {"projection": 0.05, "height": 0.14, "material": "cream"},
+        "plinth": {"projection": 0.03, "height": 0.52},
+        "apron": {"width": 0.8, "rise": 0.018},
+        "downpipe": {"every_bays": 4, "radius": 0.055},
+        "ac": {"rate": 0.3, "from_floor": 1}
+      }
+    },
+    "terracotta": {
+      "label": "陶红面砖背立面",
+      "basis": "photo",
+      "bay_width": 3.85,
+      "front": 0.025,
+      "recess": 0.25,
+      "sill_height": 0.82,
+      "head_height": 2.65,
+      "divisions": 3,
+      "pier_material": "terra",
+      "glazing": ["glass-room-0", "glass-room-1", "glass-room-2", "glass-room-3", "glass-room-4", "glass-room-5"],
+      "trim": {
+        "basis": "inferred",
+        "sill": {"projection": 0.07, "thickness": 0.06, "overhang": 0.06},
+        "eyebrow": {"projection": 0.14, "thickness": 0.08, "overhang": 0.08},
+        "pilaster": {"width": 0.34, "projection": 0.08, "material": "cream"},
+        "band": {"projection": 0.05, "height": 0.14, "material": "cream"},
+        "plinth": {"projection": 0.03, "height": 0.52},
+        "apron": {"width": 0.8, "rise": 0.018},
+        "downpipe": {"every_bays": 3, "radius": 0.055},
+        "ac": {"rate": 0.42, "from_floor": 1}
+      }
+    },
+    "corridor": {
+      "label": "外廊后的教室墙",
+      "basis": "photo",
+      "bay_width": 4.1,
+      "front_behind_gallery": 0.24,
+      "recess": 0.215,
+      "sill_height": 0.92,
+      "head_height": 2.66,
+      "divisions": 3,
+      "glazing": ["glass-room-0", "glass-room-1", "glass-room-2", "glass-room-3", "glass-room-4", "glass-room-5"],
+      "trim": {
+        "basis": "inferred",
+        "sill": {"projection": 0.05, "thickness": 0.05, "overhang": 0.05}
+      }
+    },
+    "fins": {
+      "label": "入口与中庭竖向遮阳片",
+      "basis": "photo",
+      "bay_width": 1.32,
+      "front": 0.03,
+      "recess": 0.32,
+      "sill_height": 0.42,
+      "head_height": 2.98,
+      "divisions": 1,
+      "glazing": ["glass-dusk", "glass-dusk", "glass-light", "glass-deep"],
+      "trim": {
+        "basis": "inferred",
+        "band": {"projection": 0.04, "height": 0.12, "material": "cream"}
+      }
+    },
+    "windows": {
+      "label": "北侧高体量的外挂窗",
+      "basis": "photo",
+      "bay_width": 2.75,
+      "front": -0.11,
+      "recess": 0.08,
+      "sill_height": 0.92,
+      "head_height": 2.67,
+      "divisions": 3,
+      "glazing": ["glass-dusk", "glass-dusk", "glass-light", "glass-deep"],
+      "trim": null
+    },
+    "ribbon": {
+      "label": "东南综合楼带形窗",
+      "basis": "photo",
+      "bay_width": 3.3,
+      "front": 0.12,
+      "recess": 0.22,
+      "sill_height": 0.78,
+      "head_height": 2.64,
+      "glazing": ["glass-room-0", "glass-room-1", "glass-room-2", "glass-room-3", "glass-room-4", "glass-room-5"],
+      "trim": {
+        "basis": "inferred",
+        "sill": {"projection": 0.07, "thickness": 0.06, "overhang": 0.0},
+        "eyebrow": {"projection": 0.22, "thickness": 0.09, "overhang": 0.0},
+        "plinth": {"projection": 0.03, "height": 0.52},
+        "apron": {"width": 0.8, "rise": 0.018},
+        "downpipe": {"every_bays": 4, "radius": 0.055}
+      }
+    }
+  }
+}

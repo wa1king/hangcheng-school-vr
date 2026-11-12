@@ -29,6 +29,8 @@ const surfaces = new Map<string, SurfaceResponse>([
   ['stair-stone', ['stone', .13, .27, .0011]],
   ['gallery-base-stone', ['stone', .17, .15, .0010]],
   ['curb', ['stone', .27, .09, .0026]],
+  ['plinth', ['stone', .30, .10, .0018]],
+  ['apron', ['stone', .34, .06, .0024]],
   ['decal-brickline', ['stone', .27, .19, .0015]],
   ['decal-paint-yellow', ['paint', .25, .12, 0]],
   ['decal-paint-white', ['paint', .21, .10, 0]],
