@@ -26,6 +26,6 @@
 
 ## 数据与署名
 
-[校园平面源数据](evidence/campus-osm.geojson)来自 © OpenStreetMap contributors，遵循 [ODbL 1.0](https://www.openstreetmap.org/copyright)。卫星影像和历史实拍用于核对外观。`tools/material_scans` 内的贴图经裁色和缩放，原始材质来自 Poly Haven 的 [Granite Tile 04](https://polyhaven.com/a/granite_tile_04)、[Asphalt 02](https://polyhaven.com/a/asphalt_02)、[Terrazzo Tiles](https://polyhaven.com/a/terrazzo_tiles) 和 [White Plaster 02](https://polyhaven.com/a/white_plaster_02)，遵循 [CC0](https://polyhaven.com/license)。
+[校园平面源数据](evidence/campus-osm.geojson)来自 © OpenStreetMap contributors，遵循 [ODbL 1.0](https://www.openstreetmap.org/copyright)。卫星影像和历史实拍用于核对外观。`tools/material_scans` 内的 Poly Haven 贴图经裁色和缩放，遵循 [CC0](https://polyhaven.com/license)。行道树使用 [Island Tree 03](https://polyhaven.com/a/island_tree_03) 的树叶和树皮贴图，人行道使用 [Floor Pavement](https://polyhaven.com/a/floor_pavement)。其余场景素材见[资料来源](public/scene/sources.html)。
 
 [SimWorld 控制器许可](LICENSE.upstream) · [第三方软件许可](public/THIRD-PARTY-NOTICES.txt)

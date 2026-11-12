@@ -3,7 +3,7 @@ import * as THREE from 'three';
 // The outdoor paving and the courtyard use slightly different slab heights.
 const groundLevel = -0.02;
 const rotation = -24 * Math.PI / 180;
-const groundMaterials = new Set(['plaza', 'walk', 'courtyard-paving', 'decal-brickline']);
+const groundMaterials = new Set(['plaza', 'walk', 'courtyard-paving', 'plaza-inlay', 'decal-brickline']);
 
 const groundFragment = /* glsl */`
   varying vec3 vCampusMirrorWorld;

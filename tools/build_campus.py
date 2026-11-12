@@ -12,17 +12,19 @@ EXTRA = Path(__file__).resolve().parent / '.deps'
 if EXTRA.is_dir():
     sys.path.insert(0, str(EXTRA))
 
-from shapely.geometry import LineString, Point, Polygon, box
+from shapely.geometry import Polygon, box
 from shapely.geometry.polygon import orient
 
 from access import building_access
-from architecture import building, entrance, foliage, materials, slab
+from architecture import building, entrance, materials, slab
 from entry_details import STAIR_CENTER, add_entry_details, entry_drain_opening
 from entry_greenery import detailed_tree, register_greenery
+from street_trees import register_street_trees, street_tree
 from interiors import PORTAL_Z
 from material_scans import apply_surface_materials
 from mesh import Mesh, rect, rounded
 from sports import add_sports
+from street_surfaces import build_street, ROADSIDE_TREE_X, ROADSIDE_TREE_Z
 from surroundings import add_surroundings
 
 
@@ -70,30 +72,7 @@ def landscape(visual, polygons, lines):
     for x, z in ((10.6, -1.62), (10.6, 8.70)):
         garden_bench(visual, x, z)
 
-    # Approach road and sidewalk use the mapped centreline. Surface widths are estimated.
-    extent = box(-218, -168, 170, 145)
-    road = LineString(lines[760669882] + lines[760669885][1:]).intersection(extent)
-    roadway = road.buffer(8.5, cap_style='flat')
-    sidewalk = road.buffer(11.1, cap_style='flat').difference(roadway)
-    slab(visual, roadway, -0.129, -0.129, 'road')
-    for part in sidewalk.geoms if sidewalk.geom_type == 'MultiPolygon' else [sidewalk]:
-        slab(visual, part, -0.184, -0.041, 'curb', 'walk')
-    for index in range(int(road.length / 8)):
-        a = road.interpolate(index * 8 + 0.4)
-        b = road.interpolate(index * 8 + 4)
-        visual.strip('paint-yellow', a.coords[0], b.coords[0], 0.105, -0.102)
-    side = LineString(lines[1454566188]).buffer(1.8, cap_style='flat', join_style='mitre')
-    slab(visual, side.difference(campus), -0.009, -0.009, 'walk')
-    east_road = LineString([(110, -110), (109, 73), (116, 96)])
-    # Short context edge is inferred from the 2026 aerial view, outside the modeled campus.
-    slab(visual, east_road.buffer(7.5, cap_style='flat').difference(roadway), -0.129, -0.129, 'road')
-
-    foreground = box(-2.1, 55, 33, 90.4).difference(roadway)
-    slab(visual, foreground, 0.007, 0.007, 'walk')
-    for x in range(-2, 34, 3):
-        visual.strip('brickline', (x, 55), (x, 90.1), 0.079, 0.030)
-    for z in range(55, 90, 3):
-        visual.strip('brickline', (-2, z), (33, z), 0.079, 0.032)
+    build_street(visual, campus, lines)
 
     # Low planting and broad canopy positions are inferred from the exterior references.
     bed_positions = [(-59, 48, 26, 8), (-29, 48, 14, 6), (-68, 57, 23, 4),
@@ -107,16 +86,15 @@ def landscape(visual, polygons, lines):
             position = x + w * ((u + 0.5) / max(1, round(w / 7)) - 0.5)
             tree_z = z + rng.uniform(-0.9, 0.9)
             height = rng.uniform(3.5, 6.1)
-            tree = detailed_tree if i in (3, 4, 5, 6) else foliage
-            tree(visual, position, tree_z, height, 100 * i + u, 0.21)
+            street_tree(visual, position, tree_z, height, 100 * i + u, 0.21)
 
     # Evergreen shrubs in the photographs flank the steps, outside the clear opening.
     for x, z, seed in ((.55, 51.68, 661), (20.94, 51.44, 662)):
         visual.prism('curb', rounded(x, z, 1.72, 2.21, .18), -.03, .24, 'planter')
         detailed_tree(visual, x, z, 2.85, seed, .24, .25)
 
-    for i, x in enumerate((-127, -106, -90, -75, -61, -49, -34, -22, 34, 46, 60, 72, 84, 95)):
-        foliage(visual, x, 83.4 + rng.uniform(-0.6, 0.6), rng.uniform(4.3, 7.0), 421 + i)
+    for i, x in enumerate(ROADSIDE_TREE_X):
+        street_tree(visual, x, ROADSIDE_TREE_Z + rng.uniform(-0.6, 0.6), rng.uniform(4.3, 7.0), 421 + i)
     def slope(x, z):
         fade = max(0, min(1, (-102 - z) / 36))
         return -0.23 + 13 * fade * math.exp(-((x + 52) / 75) ** 2 - ((z + 166) / 41) ** 2)
@@ -128,11 +106,11 @@ def landscape(visual, polygons, lines):
     for i in range(46):
         x = rng.uniform(-171, 95)
         z = rng.uniform(-166, -104)
-        foliage(visual, x, z, rng.uniform(4.6, 8.5), 50 + i, slope(x, z))
+        street_tree(visual, x, z, rng.uniform(4.6, 8.5), 50 + i, slope(x, z), distant=True)
     for i in range(16):
         x = rng.uniform(-157, -126)
         z = rng.uniform(-86, 46)
-        foliage(visual, x, z, rng.uniform(4.8, 7.6), 183 + i, -0.25)
+        street_tree(visual, x, z, rng.uniform(4.8, 7.6), 183 + i, -0.25, distant=True)
 
     # The courtyard and open entrance can be explored continuously from the road.
     for x in (-83.4, -64.1, -45.7, -27.6, 48, 69, 87):
@@ -206,6 +184,7 @@ def main(target=BASE / 'public' / 'scene'):
     visual = Mesh(site_to_world)
     materials(visual)
     register_greenery(visual)
+    register_street_trees(visual)
     landscape(visual, polygons, lines)
     for ident, floors, height in ((19808442, 4, TEACHING_FLOOR_HEIGHT), (1448555207, 1, 4.6),
                                    (1448555203, 5, 3.61), (1448555206, 8, 3.46)):

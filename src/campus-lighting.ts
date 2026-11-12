@@ -10,6 +10,10 @@ type Campus = Awaited<ReturnType<typeof loadCampus>>;
 const sunDirection = new THREE.Vector3(-0.69, 0.55, 0.47).normalize();
 const haze = new THREE.Color('#bed0d9');
 const zenith = new THREE.Color('#568bc6');
+const obliqueSurfaceMaterials = new Set([
+  'ground', 'plaza', 'walk', 'courtyard-paving', 'road', 'planter', 'plaza-inlay',
+  'street-paving', 'street-curb', 'street-verge', 'street-soil', 'teaching-floor',
+]);
 
 function createSky(radius: number) {
   const material = new THREE.ShaderMaterial({
@@ -467,6 +471,7 @@ export function createCampusLighting(
   if (campus.manifest.collisionFromModels) campus.collision.add(backdrop.clone());
   campus.visuals.updateMatrixWorld(true);
   const updated = new Set<THREE.Material>();
+  const textureAnisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), mobile ? 4 : 8);
   campus.visuals.traverse(object => {
     if (!(object instanceof THREE.Mesh)) return;
     const materials = Array.isArray(object.material) ? object.material : [object.material];
@@ -476,6 +481,14 @@ export function createCampusLighting(
       if (!(material instanceof THREE.MeshStandardMaterial) || updated.has(material)) continue;
       updated.add(material);
       applyCampusWeathering(material);
+      if (obliqueSurfaceMaterials.has(material.name)) {
+        for (const texture of [material.map, material.normalMap, material.roughnessMap]) {
+          if (texture && texture.anisotropy < textureAnisotropy) {
+            texture.anisotropy = textureAnisotropy;
+            texture.needsUpdate = true;
+          }
+        }
+      }
       if (material.name === 'teaching-lamp') {
         material.emissive.set('#fff1db');
         material.emissiveIntensity = 1.05;

@@ -45,7 +45,11 @@ def apply_surface_materials(mesh):
         ('plaza', 'granite', (249, 248, 242), False),
         ('walk', 'granite', (238, 237, 231), False),
         ('courtyard-paving', 'granite', (231, 220, 211), False),
-        ('road', 'asphalt', (247, 247, 248), False),
+        ('road', 'asphalt', (186, 188, 191), False),
+        ('street-paving', 'floor-pavement', (248, 252, 255), False),
+        ('street-curb', 'plaster', (181, 178, 171), False),
+        ('street-soil', 'asphalt', (184, 156, 122), False),
+        ('plaza-inlay', 'granite', (176, 120, 104), False),
         ('entry-stone', 'terrazzo', (245, 243, 235), False),
         ('stair-stone', 'terrazzo', (228, 231, 228), False),
         ('teaching-floor', 'granite', (245, 250, 246), False),
@@ -57,6 +61,10 @@ def apply_surface_materials(mesh):
     ):
         mesh.material(name, rgb, 1.0, texture=scan(source, 'color'), normal=scan(source, 'normal'),
                       roughness_map=scan(source, 'roughness'), double=double)
+    grass = SCAN_DIR.joinpath('school-grass.jpg').read_bytes(), 'image/jpeg'
+    mesh.material('street-verge', (212, 244, 210), .98, texture=grass)
+    mesh.material('paint-white', (222, 219, 200), .89, solid=False)
+    mesh.material('curb-joint', (102, 95, 83), .95, solid=False)
     for name, rgb, mortar, seed in (
         ('beige', (212, 205, 189), (181, 176, 163), 22),
         ('terra', (158, 102, 88), (135, 105, 95), 23),

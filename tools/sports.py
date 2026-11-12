@@ -11,7 +11,8 @@ from PIL import Image
 from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import unary_union
 
-from architecture import foliage, slab, tile
+from architecture import slab, tile
+from street_trees import street_tree
 from mesh import rounded, signed_area
 
 
@@ -310,7 +311,7 @@ def trackside(mesh, features):
         slab(mesh, bed, 0.02, 0.21, 'curb', 'planter')
         for offset in (-width * 0.23, 0, width * 0.23):
             if bed.covers(Point(x + offset, z)):
-                foliage(mesh, x + offset, z, 0.61 if offset else 0.92, 704 + i, 0.21)
+                street_tree(mesh, x + offset, z, 0.61 if offset else 0.92, 704 + i, 0.21, distant=True)
 
     # Low straight edge separating the running surface from the paved forecourt.
     # Heights here are inferred from the photo, with the campus grade left unchanged.

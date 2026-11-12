@@ -8,6 +8,11 @@ type SurfaceResponse = [family: SurfaceFamily, soil: number, polish: number, rel
 const surfaces = new Map<string, SurfaceResponse>([
   ['plaza', ['pavers', .31, .26, .0022]],
   ['walk', ['pavers', .30, .22, .0022]],
+  ['street-paving', ['stone', .26, .12, .0024]],
+  ['street-curb', ['stone', .32, .07, .0020]],
+  ['street-verge', ['scanned', .29, .02, .0018]],
+  ['street-soil', ['scanned', .33, .03, .0028]],
+  ['plaza-inlay', ['stone', .23, .13, .0015]],
   ['courtyard-paving', ['pavers', .33, .24, .0022]],
   ['teaching-floor', ['pavers', .16, .38, .0008]],
   ['beige', ['masonry', .23, .06, .0012]],
@@ -26,8 +31,29 @@ const surfaces = new Map<string, SurfaceResponse>([
   ['curb', ['stone', .27, .09, .0026]],
   ['decal-brickline', ['stone', .27, .19, .0015]],
   ['decal-paint-yellow', ['paint', .25, .12, 0]],
+  ['decal-paint-white', ['paint', .21, .10, 0]],
   ['decal-sports_paint', ['paint', .14, .09, 0]],
 ]);
+
+const matteGround = new Set(['road', 'street-paving', 'street-curb', 'walk', 'plaza-inlay']);
+
+const leafTransmission = /* glsl */`
+  #include <lights_physical_pars_fragment>
+  void campusLeafDirect(
+    const in IncidentLight light, const in vec3 position, const in vec3 normal,
+    const in vec3 view, const in vec3 clearcoatNormal, const in PhysicalMaterial material,
+    inout ReflectedLight result
+  ) {
+    RE_Direct_Physical(light, position, normal, view, clearcoatNormal, material, result);
+    float backlight = max(0.0, -dot(normal, light.direction));
+    float forwardScatter = max(0.0, dot(view, -light.direction));
+    // Direct light already includes the shadow test. A shaded crown cannot glow on its own.
+    vec3 transmitted = BRDF_Lambert(material.diffuseColor * vec3(0.99, 1.15, 0.61));
+    result.directDiffuse += light.color * transmitted * backlight * (0.22 + 0.34 * forwardScatter * forwardScatter);
+  }
+  #undef RE_Direct
+  #define RE_Direct campusLeafDirect
+`;
 
 const functions = /* glsl */`
   varying vec3 vCampusSurface;
@@ -165,9 +191,20 @@ const surfaceNormal = /* glsl */`
 
 /** Add metre-scale color, roughness, and relief layers over the measured material maps. */
 export function applyCampusWeathering(material: MeshStandardMaterial) {
+  if (material.name.startsWith('decal-street-leaf-') || material.name.startsWith('decal-leaf-spray-')) {
+    const previousCompile = material.onBeforeCompile;
+    const previousKey = material.customProgramCacheKey();
+    material.onBeforeCompile = (shader, renderer) => {
+      previousCompile.call(material, shader, renderer);
+      shader.fragmentShader = shader.fragmentShader.replace('#include <lights_physical_pars_fragment>', leafTransmission);
+    };
+    material.customProgramCacheKey = () => `${previousKey}|campus-leaf-transmission`;
+    return;
+  }
   const response = surfaces.get(material.name);
   if (!response) return;
   const [family, soil, polish, relief] = response;
+  const matte = matteGround.has(material.name);
   const previousCompile = material.onBeforeCompile;
   const previousKey = material.customProgramCacheKey();
   material.onBeforeCompile = (shader, renderer) => {
@@ -198,6 +235,14 @@ export function applyCampusWeathering(material: MeshStandardMaterial) {
         #include <normal_fragment_maps>
         ${surfaceNormal}
       `);
+    if (matte) {
+      // Preserve diffuse scan detail where grazing light would wash out dry paving.
+      shader.fragmentShader = shader.fragmentShader.replace('#include <lights_fragment_end>', `
+        #include <lights_fragment_end>
+        reflectedLight.directSpecular *= .14;
+        reflectedLight.indirectSpecular *= .22;
+      `);
+    }
   };
-  material.customProgramCacheKey = () => `${previousKey}|campus-surface-v2:${family}`;
+  material.customProgramCacheKey = () => `${previousKey}|campus-surface-v2:${family}:${matte}`;
 }

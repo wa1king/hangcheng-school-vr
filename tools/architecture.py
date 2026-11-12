@@ -12,6 +12,7 @@ from shapely.geometry.polygon import orient
 from shapely.ops import unary_union
 
 from mesh import rect, rounded
+from street_trees import street_tree
 
 
 def tile(color, seed, grout=None, pattern='grain'):
@@ -120,32 +121,6 @@ def window_reflection(color):
     return stream.getvalue(), 'image/jpeg'
 
 
-def canopy_texture():
-    rng = random.Random(72013)
-    size = 512
-    image = Image.new('RGB', (size, size), (40, 65, 33))
-    draw = ImageDraw.Draw(image)
-    for _ in range(4100):
-        x, y = rng.randrange(size), rng.randrange(size)
-        length, width = rng.uniform(2.5, 8.1), rng.uniform(1.15, 3.4)
-        angle = rng.uniform(0, math.tau)
-        dx, dy = math.cos(angle), math.sin(angle)
-        tint = rng.randrange(-21, 25)
-        leaf = (76 + tint, 110 + tint, 52 + tint // 2)
-        for ox, oy in ((0, 0), (size, 0), (-size, 0), (0, size), (0, -size)):
-            cx, cy = x + ox, y + oy
-            if not (-9 < cx < size + 9 and -9 < cy < size + 9):
-                continue
-            draw.polygon([(cx+length*dx, cy+length*dy), (cx-width*dy, cy+width*dx),
-                          (cx-length*dx, cy-length*dy), (cx+width*dy, cy-width*dx)], fill=leaf)
-            if length > 5.8:
-                draw.line((cx-length*dx*.7, cy-length*dy*.7, cx+length*dx*.6, cy+length*dy*.6),
-                          fill=(leaf[0]+17, leaf[1]+15, leaf[2]+12))
-    stream = BytesIO()
-    image.save(stream, 'JPEG', quality=88, optimize=True)
-    return stream.getvalue(), 'image/jpeg'
-
-
 OUTWARD_UV = [(1, 1), (1, 0), (0, 0), (0, 1)]
 
 
@@ -186,9 +161,6 @@ def materials(mesh):
     ):
         mesh.material(name, rgb, roughness, double=name in ('blue-rail', 'cream', 'frame', 'door'),
                       solid=name not in ('brickline', 'paint-yellow'))
-    foliage_color = canopy_texture()
-    for i, tone in enumerate((207, 222, 239, 255)):
-        mesh.material(f'leaf{i}', (tone, tone, tone), .86, texture=foliage_color, normal=grain_maps[0])
     for name, color in (('glass-dusk', (57, 79, 92)), ('glass-light', (87, 110, 124)),
                         ('glass-deep', (41, 57, 66)), ('glass-ribbon', (130, 148, 157))):
         mesh.material(name, (255, 255, 255), 0.25, texture=window_reflection(color), double=True)
@@ -426,38 +398,6 @@ def branch(mesh, a, b, radius_a, radius_b, material='bark', sides=7, texture_per
     mesh.face(material, lower[::-1])
 
 
-def foliage(mesh, x, z, height, seed, y=0):
-    rng = random.Random(seed)
-    crown = height * rng.uniform(0.39, 0.53)
-    lean_x, lean_z = rng.uniform(-.05, .05) * height, rng.uniform(-.05, .05) * height
-    branch(mesh, (x, y, z), (x + lean_x, y + height*.74, z + lean_z), height*.029, height*.011)
-    for index in range(2):
-        theta = index*math.pi + seed*.61
-        branch(mesh, (x + lean_x*.65, y + height*.38, z + lean_z*.65),
-               (x + height*.19*math.cos(theta), y + height*.69, z + height*.19*math.sin(theta)),
-               height*.013, height*.0055, sides=6)
-    sides, clusters = 7, 7
-    for cluster in range(clusters):
-        angle = cluster * math.tau / (clusters - 1) + rng.uniform(-0.15, 0.15)
-        central = cluster == clusters - 1
-        offset = 0 if central else crown * rng.uniform(0.36, 0.72)
-        cx, cz = x + offset * math.cos(angle), z + offset * math.sin(angle)
-        cy = y + height * (0.71 if central else rng.uniform(0.52, 0.72))
-        radius = crown * rng.uniform(0.42, 0.77)
-        levels = []
-        for h, scale in ((-0.53, 0.36), (-0.22, 0.8), (0.13, 1.0), (0.51, 0.69), (0.82, 0.17)):
-            levels.append([(cx + radius * scale * rng.uniform(0.87, 1.12) * math.cos(i * math.tau / sides), cy + radius * h,
-                            cz + radius * scale * rng.uniform(0.87, 1.12) * math.sin(i * math.tau / sides)) for i in range(sides)])
-        for level, (lower, upper) in enumerate(zip(levels, levels[1:])):
-            for i in range(sides):
-                j = (i + 1) % sides
-                points = (lower[i], upper[i], upper[j], lower[j])
-                mesh.face(f'leaf{rng.choices(range(4), weights=(4-level, 4, 2+level, level+1))[0]}', points,
-                          uv=[(px*.68 + pz*.17, py*.56 + pz*.37) for px, py, pz in points],
-                          normals=[(px-cx, (py-cy)*.80, pz-cz) for px, py, pz in points])
-        mesh.face('leaf3', list(reversed(levels[-1])))
-
-
 def roof_terraces(mesh, polygon, ident, height, clear=None):
     # The newer overhead image shows paved terraces between the planting beds.
     # These approximate planting locations sit inside the mapped roof outlines.
@@ -513,7 +453,7 @@ def roof_terraces(mesh, polygon, ident, height, clear=None):
             centre = path.interpolate((index + rng.uniform(0.27, 0.73)) / plant_count, normalized=True)
             x, z = centre.x + rng.uniform(-0.49, 0.49), centre.y + rng.uniform(-0.45, 0.45)
             if plantable.covers(Point(x, z)):
-                foliage(mesh, x, z, rng.uniform(0.8, 1.92), rng.randrange(100000), y + 0.114)
+                street_tree(mesh, x, z, rng.uniform(0.8, 1.92), rng.randrange(100000), y + 0.114, distant=True)
 
 
 def northern_hall(mesh, polygon, lower_roof, roof_top):
