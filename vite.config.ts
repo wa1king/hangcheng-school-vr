@@ -2,11 +2,23 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
 
-function preloadCampusModel(): Plugin {
+function campusPageMetadata(): Plugin {
   let href: string | undefined;
+  let version: string;
+  const versionClock = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  });
   return {
-    name: 'preload-campus-model',
+    name: 'campus-page-metadata',
     apply: 'build',
+    buildStart() {
+      const { year, month, day, hour, minute, second } = Object.fromEntries(
+        versionClock.formatToParts(new Date()).map(({ type, value }) => [type, value]),
+      );
+      version = `版本 ${year}.${month}.${day}-${hour}${minute}${second}`;
+    },
     configResolved(config) {
       if (!config.publicDir) return;
       const manifest = JSON.parse(readFileSync(resolve(config.publicDir, 'scene/scene.json'), 'utf8'));
@@ -28,20 +40,22 @@ function preloadCampusModel(): Plugin {
     },
     transformIndexHtml: {
       order: 'post',
-      handler() {
-        if (!href) return;
-        return [{
-          tag: 'link',
-          attrs: { rel: 'preload', as: 'fetch', href, crossorigin: 'anonymous', fetchpriority: 'low' },
-          injectTo: 'head',
-        }];
+      handler(html) {
+        return {
+          html: html.replace('<!-- build-version -->本地预览', version),
+          tags: href ? [{
+            tag: 'link',
+            attrs: { rel: 'preload', as: 'fetch', href, crossorigin: 'anonymous', fetchpriority: 'low' },
+            injectTo: 'head',
+          }] : [],
+        };
       },
     },
   };
 }
 
 export default defineConfig({
-  plugins: [preloadCampusModel()],
+  plugins: [campusPageMetadata()],
   build: {
     rolldownOptions: {
       output: {

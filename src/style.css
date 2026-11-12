@@ -166,7 +166,7 @@ h1 { font-size: clamp(19px, 2.5vw, 30px); font-weight: 660; line-height: 1.18; o
 .location {
   position: absolute;
   left: max(var(--inset), env(safe-area-inset-left));
-  bottom: max(var(--inset), calc(env(safe-area-inset-bottom) + 9px));
+  bottom: max(calc(var(--inset) + 19px), calc(env(safe-area-inset-bottom) + 31px));
   display: flex;
   align-items: center;
   gap: 7px;
@@ -190,16 +190,20 @@ h1 { font-size: clamp(19px, 2.5vw, 30px); font-weight: 660; line-height: 1.18; o
 #move-thumb { width: 43px; height: 43px; display: block; border-radius: 50%; border: 1px solid #eafaafba; background: #d9f2989c; pointer-events: none; }
 .vertical-buttons { display: grid; gap: 8px; right: max(18px, env(safe-area-inset-right)); }
 .vertical-buttons button { height: 44px; width: 46px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); color: var(--accent); font-size: 21px; touch-action: none; }
-.map-credit {
+.map-credit, .site-version {
   position: absolute;
-  right: max(10px, calc(env(safe-area-inset-right) + 5px));
   bottom: max(6px, env(safe-area-inset-bottom));
   color: #f2f6ee;
   padding: 2px 5px;
   border-radius: 4px;
   background: #10241eeb;
   font-size: 11px;
-  text-underline-offset: 2px;
+}
+.map-credit { right: max(10px, calc(env(safe-area-inset-right) + 5px)); text-underline-offset: 2px; }
+.site-version {
+  left: max(10px, calc(env(safe-area-inset-left) + 5px));
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 #diagnostics { position: absolute; left: 12px; top: 90px; margin: 0; padding: 9px; border-radius: 8px; font: 11px/1.5 monospace; color: #f3fbd5; background: #132823eb; pointer-events: none; }
 
@@ -223,11 +227,11 @@ h1 { font-size: clamp(19px, 2.5vw, 30px); font-weight: 660; line-height: 1.18; o
   .mode-controls button { padding: 0 9px; }
   .site-mark { display: none; }
   .location select { max-width: 27vw; }
+  .map-credit, .site-version { font-size: 10px; padding-inline: 3px; }
 }
 @media (orientation: landscape) and (max-height: 450px) {
-  .hud-bottom { bottom: max(25px, calc(env(safe-area-inset-bottom) + 20px)); }
+  .hud-bottom, .move-pad, .vertical-buttons { bottom: max(28px, calc(env(safe-area-inset-bottom) + 23px)); }
   .controls-hint { display: none; }
-  .move-pad, .vertical-buttons { bottom: max(23px, env(safe-area-inset-bottom)); }
   .move-pad { width: 85px; height: 85px; }
   .location { top: max(67px, calc(env(safe-area-inset-top) + 56px)); bottom: auto; }
   .direction-controls { top: max(67px, calc(env(safe-area-inset-top) + 56px)); }
