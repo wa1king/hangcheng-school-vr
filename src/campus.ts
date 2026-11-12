@@ -100,7 +100,10 @@ export async function loadCampus() {
   const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
   const visuals = new Group();
   const collision = new Group();
-  const models = await Promise.all(manifest.models.map(model => loader.loadAsync(modelURL(model.url))));
+  const [models, collisionAsset] = await Promise.all([
+    Promise.all(manifest.models.map(model => loader.loadAsync(modelURL(model.url)))),
+    manifest.collisionUrl ? loader.loadAsync(modelURL(manifest.collisionUrl)) : undefined,
+  ]);
   for (const [index, asset] of models.entries()) {
     const config = manifest.models[index];
     const wrapper = new Group();
@@ -111,9 +114,8 @@ export async function loadCampus() {
     visuals.add(wrapper);
   }
 
-  if (manifest.collisionUrl) {
-    const asset = await loader.loadAsync(modelURL(manifest.collisionUrl));
-    collectMeshes(asset.scene, collision, mesh => mesh.userData.collision !== false);
+  if (collisionAsset) {
+    collectMeshes(collisionAsset.scene, collision, mesh => mesh.userData.collision !== false);
   } else {
     collectMeshes(visuals, collision, isCollisionNode);
   }

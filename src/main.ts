@@ -442,6 +442,7 @@ async function initialize() {
     diagnostics.hidden = !debug;
     fullscreen.hidden = !document.fullscreenEnabled;
 
+    const pendingPlayer = import('./exploration/player.ts').catch((loadError: unknown) => ({ loadError }));
     campus = await loadCampus();
     scene.add(campus.visuals);
     lightCampus();
@@ -449,8 +450,9 @@ async function initialize() {
     configureInfo(campus.manifest, campus.manifestURL);
     if (campus.collision.children.length) {
       try {
-        const { createPlayerController } = await import('./exploration/player.ts');
-        player = await createPlayerController(
+        const controller = await pendingPlayer;
+        if ('loadError' in controller) throw controller.loadError;
+        player = await controller.createPlayerController(
           campus.collision,
           new THREE.Vector3().fromArray(campus.manifest.spawn.position),
           { object: new THREE.Group(), updateMotion() {}, dispose() {} },
