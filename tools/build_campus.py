@@ -17,7 +17,7 @@ from shapely.geometry.polygon import orient
 
 from access import building_access
 from architecture import building, entrance, foliage, materials, slab
-from entry_details import add_entry_details, entry_drain_opening
+from entry_details import STAIR_CENTER, add_entry_details, entry_drain_opening
 from entry_greenery import detailed_tree, register_greenery
 from interiors import PORTAL_Z
 from material_scans import apply_surface_materials
@@ -170,7 +170,7 @@ def manifest(dest, polygons):
             revision = file_digest(file, 'sha256').hexdigest()[:12]
         return f'./{name}?v={revision}'
 
-    places = [location('gate', '校门广场', 11, 86.4, -0.13, 0.22),
+    places = [location('gate', '校门广场', STAIR_CENTER, 86.4, pitch=0.22),
               location('track', '田径场', -72.6, -22.1, -0.95),
               location('stands', '西侧看台', -92.0, -52.0, 0.97),
               location('courtyard', '教学楼中庭', 11.7, 10.7, math.pi),
@@ -189,7 +189,8 @@ def manifest(dest, polygons):
     data = {
         'title': '深圳市宝安区航城学校',
         'status': '外观参考重建 · 室内布局示意',
-        'description': '航空路 10 号本部。校舍外观参照开放地图和影像，楼内布局为游览示意。可进入教学楼，沿走廊和楼梯走到屋顶。',
+        'description': '航空路 10 号本部。课堂方位以从校门面向主楼为北。校舍外观参照开放地图和影像，楼内布局为游览示意。可进入教学楼，沿走廊和楼梯走到屋顶。',
+        'northYaw': round(-ANGLE, 8),
         'models': [{'url': resource('campus.glb')}, {'url': resource('surroundings.glb'), 'surroundings': True}],
         'collisionFromModels': True,
         'evidenceUrl': './sources.html',

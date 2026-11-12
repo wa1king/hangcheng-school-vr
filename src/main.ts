@@ -96,6 +96,10 @@ function turn(step: -1 | 1) {
   setHeading(THREE.MathUtils.euclideanModulo(heading + step, directions.length));
 }
 
+function directionYaw() {
+  return (campus?.manifest.northYaw ?? 0) + directions[heading].yaw;
+}
+
 function setCameraZoom() {
   camera.zoom = mode === 'overview' ? 1 : viewZoom;
   camera.updateProjectionMatrix();
@@ -158,7 +162,7 @@ function updateHud() {
 const overviewScale = (aspect: number) => Math.max(1, 1.05 / aspect);
 
 function orientOverview() {
-  const { yaw } = directions[heading];
+  const yaw = directionYaw();
   const distance = Math.hypot(camera.position.x - orbit.target.x, camera.position.z - orbit.target.z);
   camera.position.x = orbit.target.x + Math.sin(yaw) * distance;
   camera.position.z = orbit.target.z + Math.cos(yaw) * distance;
@@ -184,11 +188,13 @@ function showOverview() {
 
 function updateTourView() {
   const feet = mode === 'walk' ? player?.position : flightFeet;
-  if (feet && mode !== 'overview' && !xrSession) updateCamera(feet, directions[heading].yaw, pitch);
+  if (feet && mode !== 'overview' && !xrSession) updateCamera(feet, directionYaw(), pitch);
 }
 
 function faceLocation(at: CampusPoint, defaultPitch = 0) {
-  heading = THREE.MathUtils.euclideanModulo(Math.round(-(at.yaw ?? 0) / (Math.PI / 2)), directions.length);
+  const north = campus?.manifest.northYaw ?? 0;
+  const offset = (at.yaw ?? north) - north;
+  heading = THREE.MathUtils.euclideanModulo(Math.round(-offset / (Math.PI / 2)), directions.length);
   pitch = at.pitch ?? defaultPitch;
 }
 
@@ -314,7 +320,7 @@ function resize() {
 }
 
 function moveFlat(dt: number) {
-  const { yaw } = directions[heading];
+  const yaw = directionYaw();
   forward.set(-Math.sin(yaw), 0, -Math.cos(yaw));
   right.set(Math.cos(yaw), 0, -Math.sin(yaw));
   direction.copy(forward).multiplyScalar(input.ahead).addScaledVector(right, input.side);
@@ -378,7 +384,7 @@ async function enterVR() {
     input.releaseAll();
     updateHud();
     rig.position.copy(player.position);
-    rig.rotation.y = directions[heading].yaw;
+    rig.rotation.y = directionYaw();
     camera.position.set(0, 0, 0);
     camera.quaternion.identity();
     session.addEventListener('end', () => {
@@ -424,7 +430,7 @@ function frame(time: number, xrFrame?: XRFrame) {
     const { calls, triangles } = renderer.info.render;
     const feetCoords = (mode === 'overview' ? player?.position : feet)?.toArray().map(value => value.toFixed(2)).join(', ') ?? '—';
     const facing = directions[heading];
-    diagnostics.textContent = `${mode}${mode === 'walk' && player?.grounded ? ' grounded' : ''}\n${coords}\n${calls} draws · ${triangles.toLocaleString()} tris\nheading ${facing.yaw.toFixed(3)}\nfeet ${feetCoords}\nfacing ${facing.label}\nzoom ${camera.zoom.toFixed(3)}\nmirror ${pavement?.active ? 'on' : 'off'} · ${pavement?.passes ?? 0} captures`;
+    diagnostics.textContent = `${mode}${mode === 'walk' && player?.grounded ? ' grounded' : ''}\n${coords}\n${calls} draws · ${triangles.toLocaleString()} tris\nheading ${directionYaw().toFixed(3)}\nfeet ${feetCoords}\nfacing ${facing.label}\nzoom ${camera.zoom.toFixed(3)}\nmirror ${pavement?.active ? 'on' : 'off'} · ${pavement?.passes ?? 0} captures`;
   }
 }
 

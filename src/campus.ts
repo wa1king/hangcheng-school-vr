@@ -19,6 +19,7 @@ type CampusManifest = {
   title: string;
   status?: string;
   description?: string;
+  northYaw?: number;
   models: Model[];
   collisionUrl?: string;
   collisionFromModels?: boolean;
@@ -108,6 +109,9 @@ export async function loadCampus() {
   const manifest = await response.json() as CampusManifest;
   if (typeof manifest.title !== 'string' || !Array.isArray(manifest.models) || !manifest.models.length || !validPoint(manifest.spawn)) {
     throw new Error('校园场景缺少名称、模型或有效起点。');
+  }
+  if (manifest.northYaw !== undefined && !Number.isFinite(manifest.northYaw)) {
+    throw new Error('校园方位设置无效。');
   }
   if (manifest.overview && (!validCoordinate(manifest.overview.position) || !validCoordinate(manifest.overview.target))) {
     throw new Error('校园总览机位无效。');
