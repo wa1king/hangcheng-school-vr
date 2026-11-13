@@ -17,8 +17,10 @@ globalThis.self = globalThis;
 globalThis.createImageBitmap = async () => ({ width: 1, height: 1 });
 
 const fps = 30;
+const bakeRate = 60;
 const up = new Vector3(0, 1, 0);
 const right = new Vector3(1, 0, 0);
+const forward = new Vector3(0, 0, 1);
 const captures = [
   { id: '37_01', duration: 1.267, label: 'Slow' },
   { id: '07_01', duration: 1.100, label: 'Normal' },
@@ -105,42 +107,98 @@ function transformRotation(bone, worldRotation) {
   bone.quaternion.copy(bone.parent.getWorldQuaternion(quaternion()).invert().multiply(worldRotation));
 }
 
-function legBend(hip, foot, sourceKnee, thigh, shin) {
+function bendPole(line, knee) {
+  return knee.clone().addScaledVector(line, -knee.dot(line));
+}
+
+function legBend(hip, foot, capturedPole, thigh, shin) {
   const line = foot.clone().sub(hip);
   const length = line.length();
   line.divideScalar(length);
   const effectiveLength = Math.min(length, thigh + shin - .0001);
   const along = (effectiveLength ** 2 + thigh ** 2 - shin ** 2) / (2 * effectiveLength);
-  const side = sourceKnee.clone().addScaledVector(line, -sourceKnee.dot(line)).normalize();
-  return hip.clone().addScaledVector(line, along).addScaledVector(side, Math.sqrt(Math.max(0, thigh ** 2 - along ** 2)));
+  const sagittal = forward.clone().addScaledVector(line, -forward.dot(line)).normalize();
+  const lateral = sagittal.clone().cross(line);
+  // The knees flex mostly forward. A bounded source yaw retains natural
+  // side motion without transferring spurious twist near a straight knee.
+  const yaw = Math.atan2(capturedPole.dot(lateral), capturedPole.dot(sagittal));
+  const confidence = Math.min(1, capturedPole.length() / .12);
+  const boundedYaw = Math.max(-.35, Math.min(.35, yaw)) * confidence;
+  const pole = sagittal.multiplyScalar(Math.cos(boundedYaw)).addScaledVector(lateral, Math.sin(boundedYaw));
+  return hip.clone().addScaledVector(line, along).addScaledVector(pole, Math.sqrt(Math.max(0, thigh ** 2 - along ** 2)));
 }
 
 function supportCorrections(frames, source) {
   const count = frames.length - 1;
+  const travel = frames.at(-1).Hips.position.clone().sub(frames[0].Hips.position);
+  travel.y = 0;
   const ankle = frames.map(frame => frame[source + 'Foot'].position);
   const toes = frames.map(frame => frame[source + 'ToeBase'].position);
-  const speed = (joint, index) => joint[index + 1].distanceTo(joint[index]) * fps;
+  const ring = index => ((index % count) + count) % count;
+  const sample = (points, index) => points[ring(index)].clone().addScaledVector(travel, Math.floor(index / count));
+  const speed = (joint, index) => sample(joint, index + 1).distanceTo(sample(joint, index)) * fps;
   const corrections = Array.from({ length: frames.length }, vector);
   const intervals = [];
-  let index = 0;
-  while (index < count) {
-    if (speed(ankle, index) > 5 || speed(toes, index) > 5) {
+  const stable = index => speed(ankle, index) <= 5.4 && speed(toes, index) <= 5.4;
+  const begin = Array.from({ length: count }, (_, index) => index).find(index => !stable(index)) ?? 0;
+  let index = begin;
+  while (index < begin + count) {
+    if (!stable(index)) {
       index++;
       continue;
     }
     const start = index;
-    while (index < count && speed(ankle, index) <= 5 && speed(toes, index) <= 5) index++;
+    while (index < begin + count && stable(index)) index++;
     if (index - start < 3) continue;
     intervals.push([start, index]);
     const mean = vector();
-    for (let sample = start; sample <= index; sample++) mean.add(ankle[sample]);
+    for (let frame = start; frame <= index; frame++) mean.add(sample(ankle, frame));
     mean.multiplyScalar(1 / (index - start + 1));
-    for (let sample = Math.max(0, start - 2); sample <= Math.min(count, index + 2); sample++) {
-      const blend = Math.min(1, (sample - start + 3) / 3, (index - sample + 3) / 3);
-      corrections[sample].addScaledVector(mean.clone().sub(ankle[sample]), blend);
+    for (let frame = start - 2; frame <= index + 2; frame++) {
+      const weight = Math.min(1, (frame - start + 3) / 3, (index - frame + 3) / 3);
+      const blend = weight * weight * (3 - 2 * weight);
+      corrections[ring(frame)].addScaledVector(mean.clone().sub(sample(ankle, frame)), blend);
     }
   }
+  corrections[count].copy(corrections[0]);
   return { corrections, intervals };
+}
+
+// Close the pose and its tangent before sampling a periodic spline. This
+// follows the same periodic-Hermite approach as CROSSTOWN's crowd renderer.
+function bakeLoop(values, count) {
+  const period = values.length - 1;
+  const isQuaternion = values[0].isQuaternion;
+  const components = values.map(value => value.toArray());
+  const align = (value, reference) => isQuaternion && value.reduce((dot, v, i) => dot + v * reference[i], 0) < 0
+    ? value.map(v => -v) : value;
+  const initial = components[0];
+  const final = align(components[period], initial);
+  const seam = initial.map((value, i) => (value + final[i]) * .5);
+  for (const index of [0, period]) components[index] = seam;
+  // A short quintic window removes residual closure error while preserving
+  // motion through the seam. It does not average the neighboring poses.
+  const blendWindow = 5;
+  for (let j = 1; j < blendWindow; j++) {
+    const t = 1 - j / blendWindow;
+    const weight = t ** 3 * (10 + t * (-15 + 6 * t));
+    for (const [index, endpoint] of [[j, initial], [period - j, final]]) {
+      components[index] = align(components[index], endpoint)
+        .map((value, i) => value + weight * (seam[i] - endpoint[i]));
+    }
+  }
+  const at = i => components[((i % period) + period) % period];
+  return Array.from({ length: count + 1 }, (_, i) => {
+    const phase = i === count ? 0 : i / count * period;
+    const j = Math.floor(phase);
+    const t = phase - j, t2 = t * t, t3 = t2 * t;
+    const a = at(j), b = align(at(j + 1), a);
+    const before = align(at(j - 1), a), after = align(at(j + 2), b);
+    const sample = a.map((v, k) => (2 * t3 - 3 * t2 + 1) * v + (t3 - 2 * t2 + t) * (b[k] - before[k]) * .5
+      + (-2 * t3 + 3 * t2) * b[k] + (t3 - t2) * (after[k] - a[k]) * .5);
+    const value = values[0].clone().fromArray(sample);
+    return isQuaternion ? value.normalize() : value;
+  });
 }
 
 async function readCharacter(name) {
@@ -212,6 +270,8 @@ function retarget(character, capture) {
     return [name, mean.invert()];
   }));
   const meanY = capture.frames.reduce((sum, frame) => sum + frame.Hips.position.y, 0) / frameCount;
+  const meanFootSeparation = capture.frames.reduce((sum, frame) =>
+    sum + frame.LeftFoot.position.x - frame.RightFoot.position.x, 0) / frameCount;
   const lowFeet = limbs.map(({ source }) => Math.min(...capture.frames.map(frame =>
     frame[`${source}Foot`].position.y)));
   const midpointX = (first.x + last.x) * .5;
@@ -234,10 +294,33 @@ function retarget(character, capture) {
     const center = first.clone().lerp(last, phase);
     const hip = frame.Hips.position;
     const pelvis = pelvisRest.clone().add(new Vector3(
-      (hip.x - center.x) * legRatio,
-      (hip.y - meanY) * legRatio - .025,
+      (hip.x - center.x) * legRatio * .82,
+      (hip.y - meanY) * legRatio * .92,
       (hip.z - center.z) * legRatio,
     ));
+    const feet = limbs.map(({ side, source, support }, legIndex) => {
+      const ankle = frame[`${source}Foot`].position.clone().add(support.corrections[index]);
+      const toes = frame[`${source}ToeBase`].position.clone().add(support.corrections[index]);
+      const footRest = rest[`foot_${side}`];
+      const widthOffset = .45 * meanFootSeparation * (side === 'l' ? 1 : -1);
+      const target = new Vector3(
+        (ankle.x - midpointX - widthOffset) * legRatio * .88 + .5 * footRest.position.x,
+        footRest.position.y + (ankle.y - lowFeet[legIndex]) * legRatio,
+        footRest.position.z + (ankle.z - center.z - centerZ[legIndex]) * legRatio,
+      );
+      return { ankle, toes, target };
+    });
+    // Preserve extension in stance instead of applying a constant crouch.
+    // Lower the root only when a captured stride would exceed rig leg reach.
+    let ceiling = Infinity;
+    for (const [legIndex, { side, thigh, shin }] of limbs.entries()) {
+      const hipOffset = rest[`thigh_${side}`].position.clone().sub(pelvisRest);
+      const foot = feet[legIndex].target;
+      const horizontalSquared = (pelvis.x + hipOffset.x - foot.x) ** 2 + (pelvis.z + hipOffset.z - foot.z) ** 2;
+      const reachable = Math.sqrt(Math.max(.09, ((thigh + shin) * .991) ** 2 - horizontalSquared));
+      ceiling = Math.min(ceiling, foot.y + reachable - hipOffset.y);
+    }
+    pelvis.y = Math.min(pelvis.y, ceiling - .006);
     transformPosition(bones.pelvis, pelvis);
     for (const [name, source] of Object.entries(upperBody)) {
       const change = frame[source].rotation.clone().multiply(reference[source]);
@@ -245,16 +328,10 @@ function retarget(character, capture) {
       transformRotation(bones[name], quaternion().slerp(change, weight).multiply(rest[name].rotation));
     }
 
-    for (const [legIndex, { side, source, thigh, shin, support }] of limbs.entries()) {
-      const ankle = frame[`${source}Foot`].position.clone().add(support.corrections[index]);
-      const toes = frame[`${source}ToeBase`].position.clone().add(support.corrections[index]);
+    for (const [legIndex, { side, source, thigh, shin }] of limbs.entries()) {
+      const { ankle, toes, target: footTarget } = feet[legIndex];
       const joint = bones[`foot_${side}`];
       const footRest = rest[`foot_${side}`];
-      const footTarget = new Vector3(
-        (ankle.x - midpointX) * legRatio * .80,
-        footRest.position.y + (ankle.y - lowFeet[legIndex]) * legRatio,
-        footRest.position.z + (ankle.z - center.z - centerZ[legIndex]) * legRatio,
-      );
       const capturedDirection = relativeDirection(ankle, toes);
       // Keep the captured heel/toe pitch; tame lateral toe flare on the mismatched shoe lasts.
       const pitch = Math.atan2(capturedDirection.y, capturedDirection.z);
@@ -272,8 +349,12 @@ function retarget(character, capture) {
       const upper = bones[`thigh_${side}`];
       const lower = bones[`calf_${side}`];
       const hipJoint = upper.getWorldPosition(vector());
-      const originalKnee = frame[`${source}Leg`].position.clone().sub(frame[`${source}UpLeg`].position);
-      const knee = legBend(hipJoint, footTarget, originalKnee, thigh, shin);
+      const sourceHip = frame[source + 'UpLeg'].position;
+      const sourceKnee = frame[source + 'Leg'].position;
+      const sourceAnkle = frame[source + 'Foot'].position;
+      const capturedPole = bendPole(relativeDirection(sourceHip, sourceAnkle), sourceKnee.clone().sub(sourceHip))
+        .multiplyScalar(legRatio);
+      const knee = legBend(hipJoint, footTarget, capturedPole, thigh, shin);
       const upperRest = rest[`thigh_${side}`];
       const lowerRest = rest[`calf_${side}`];
       const upperDirection = relativeDirection(upperRest.position, lowerRest.position);
@@ -286,18 +367,27 @@ function retarget(character, capture) {
       const palm = rest[`hand_${side}`];
       const downArm = relativeDirection(frame[`${source}Arm`].position, frame[`${source}ForeArm`].position);
       const downForearm = relativeDirection(frame[`${source}ForeArm`].position, frame[`${source}Hand`].position);
+      const downHand = relativeDirection(frame[`${source}Hand`].position, frame[`${source}FingerBase`].position);
       const outward = side === 'l' ? 1 : -1;
-      downArm.x = outward * Math.max(.135, Math.abs(downArm.x) * .86);
-      downForearm.x = outward * Math.max(.045, Math.abs(downForearm.x) * .46);
+      downArm.x = outward * Math.max(.095, Math.abs(downArm.x) * .74);
+      downForearm.x = outward * Math.max(.025, Math.abs(downForearm.x) * .43);
       transformRotation(bones[`upperarm_${side}`],
         shortestRotation(relativeDirection(shoulder.position, elbow.position), downArm.normalize()).multiply(shoulder.rotation));
       transformRotation(bones[`lowerarm_${side}`],
         shortestRotation(relativeDirection(elbow.position, palm.position), downForearm.normalize()).multiply(elbow.rotation));
+      const hand = bones[`hand_${side}`];
+      const restHandDirection = new Vector3(0, 1, 0).applyQuaternion(palm.rotation);
+      const forearmRotation = bones[`lowerarm_${side}`].getWorldQuaternion(quaternion());
+      const handRelaxed = forearmRotation.multiply(palm.local);
+      const inheritedDirection = new Vector3(0, 1, 0).applyQuaternion(handRelaxed);
+      if (restHandDirection.dot(downHand) < -.6) downHand.negate();
+      const handAdjustment = shortestRotation(inheritedDirection, downHand);
+      transformRotation(hand, quaternion().slerp(handAdjustment, .5).multiply(handRelaxed));
     }
 
     scene.updateMatrixWorld(true);
-    const feet = shoeSamples(shoes);
-    const correction = .002 - Math.min(...feet.map(foot => foot.y));
+    const soles = shoeSamples(shoes);
+    const correction = .002 - Math.min(...soles.map(foot => foot.y));
     const raise = new Vector3(0, correction, 0);
     for (const name of Object.keys(positions)) {
       const bone = bones[name];
@@ -307,31 +397,23 @@ function retarget(character, capture) {
     for (const name of targetNames) rotations[name].push(bones[name].quaternion.clone());
   }
 
-  // Distribute the small closure mismatch across 3 samples on each side of
-  // the seam. Keep the mid-stride support from the unmodified capture.
-  function close(values) {
-    const first = values[0].clone();
-    const last = values.at(-1).clone();
-    const seam = first.isQuaternion ? first.slerp(last, .5) : first.lerp(last, .5);
-    for (let offset = 0; offset < 3; offset++) {
-      const influence = 1 - offset / 3;
-      for (const index of [offset, values.length - 1 - offset]) {
-        if (values[index].isQuaternion) values[index].slerp(seam, influence);
-        else values[index].lerp(seam, influence);
-      }
-    }
+  const bakedCount = Math.round(capture.duration * bakeRate);
+  const dt = capture.duration / bakedCount;
+  for (const track of [rotations, positions]) {
+    for (const [name, values] of Object.entries(track)) track[name] = bakeLoop(values, bakedCount);
   }
-  Object.values(rotations).forEach(close);
-  Object.values(positions).forEach(close);
 
   // Pin the visible shoe's sole contact patch as the root translates. Corrections
   // fade in at heel strike and out before toe off. This keeps captured roll.
   const shoe = shoes[0];
   if (shoe) {
     for (const { side, support } of limbs) {
-      for (const [start, end] of support.intervals) {
+      for (const [sourceStart, sourceEnd] of support.intervals) {
+        const start = sourceStart * bakedCount / (frameCount - 1);
+        const end = sourceEnd * bakedCount / (frameCount - 1);
+        const ring = frame => ((frame % bakedCount) + bakedCount) % bakedCount;
         const middle = Math.round((start + end) / 2);
-        samplePose(middle);
+        samplePose(ring(middle));
         shoe.skeleton.update();
         const point = vector();
         const vertices = [];
@@ -342,17 +424,17 @@ function retarget(character, capture) {
         vertices.sort((a, b) => a.y - b.y);
         const patch = vertices.slice(0, 14).map(vertex => vertex.index);
         const anchor = supportPoint(shoe, patch);
-        anchor.z += middle / fps * speed;
-        for (let index = Math.max(1, start - 2); index <= Math.min(frameCount - 2, end + 2); index++) {
-          samplePose(index);
+        anchor.z += middle * dt * speed;
+        for (let index = Math.floor(start - 5); index <= Math.ceil(end + 5); index++) {
+          samplePose(ring(index));
           shoe.skeleton.update();
           const current = supportPoint(shoe, patch);
-          current.z += index / fps * speed;
+          current.z += index * dt * speed;
           const shift = anchor.clone().sub(current);
           shift.y = 0;
-          const blend = Math.min(1, (index - start + 3) / 3, (end - index + 3) / 3);
-          shift.multiplyScalar(blend).clampLength(0, .04);
-          contactPatch.set(side + index, shift);
+          const weight = Math.max(0, Math.min(1, (index - start + 5) / 5, (end - index + 5) / 5));
+          shift.clampLength(0, .052).multiplyScalar(weight * weight * (3 - 2 * weight));
+          contactPatch.set(side + ring(index), shift);
         }
       }
     }
@@ -360,9 +442,10 @@ function retarget(character, capture) {
 
   // Re-solve the vertical offset after smoothing the loop seam, because
   // interpolation can otherwise leave a short hover at the wraparound.
-  for (let index = 0; index < frameCount; index++) {
+  const leadingFoot = [[], []];
+  for (let index = 0; index < bakedCount; index++) {
     samplePose(index);
-    for (const { side, source, thigh, shin } of limbs) {
+    for (const { side, thigh, shin } of limbs) {
       const shift = contactPatch.get(side + index);
       if (!shift) continue;
       const name = `foot_${side}`;
@@ -374,9 +457,8 @@ function retarget(character, capture) {
       const lowerName = `calf_${side}`;
       const upper = bones[upperName], lower = bones[lowerName];
       const hip = upper.getWorldPosition(vector());
-      const frame = capture.frames[index];
-      const referenceKnee = frame[source + 'Leg'].position.clone().sub(frame[source + 'UpLeg'].position);
-      const knee = legBend(hip, target, referenceKnee, thigh, shin);
+      const capturedPole = bendPole(relativeDirection(hip, target), lower.getWorldPosition(vector()).sub(hip));
+      const knee = legBend(hip, target, capturedPole, thigh, shin);
       const upperRest = rest[upperName], lowerRest = rest[lowerName], footRest = rest[name];
       transformRotation(upper, shortestRotation(relativeDirection(upperRest.position, lowerRest.position),
         relativeDirection(hip, knee)).multiply(upperRest.rotation));
@@ -386,7 +468,13 @@ function retarget(character, capture) {
       rotations[lowerName][index].copy(lower.quaternion);
     }
     scene.updateMatrixWorld(true);
-    const adjustment = .002 - Math.min(...shoeSamples(shoes).map(foot => foot.y));
+    const soles = shoeSamples(shoes);
+    const adjustment = .002 - Math.min(...soles.map(foot => foot.y));
+    const ahead = soles[0].z >= soles[1].z ? 0 : 1;
+    const spread = Math.abs(soles[0].z - soles[1].z);
+    // Start on a frame with both shoes near the floor, favouring a shorter
+    // stride during the fade from idle. Find a left- and a right-leading frame.
+    leadingFoot[ahead].push({ index, score: Math.abs(soles[0].y - soles[1].y) * 3 + .11 * spread });
     for (const [name, values] of Object.entries(positions)) {
       const bone = bones[name];
       const world = bone.getWorldPosition(vector());
@@ -395,8 +483,22 @@ function retarget(character, capture) {
       values[index].copy(bone.position);
     }
   }
+  for (const values of [...Object.values(rotations), ...Object.values(positions)]) {
+    values[bakedCount].copy(values[0]);
+    // Keep the final contact correction periodic as well. In the two keys
+    // surrounding the seam, share the tangent derived from both sides.
+    const center = values[0].toArray();
+    const align = value => values[0].isQuaternion && value.dot(values[0]) < 0
+      ? value.toArray().map(component => -component) : value.toArray();
+    const before = align(values[bakedCount - 1]), after = align(values[1]);
+    for (const [index, direction] of [[1, 1], [bakedCount - 1, -1]]) {
+      const equalSlope = center.map((component, i) => component + direction * (after[i] - before[i]) * .5);
+      values[index].fromArray(equalSlope);
+      if (values[index].isQuaternion) values[index].normalize();
+    }
+  }
   const flatten = values => values.flatMap(value => value.toArray().map(component => +component.toFixed(5)));
-  const times = Array.from({ length: frameCount }, (_, index) => +(index / fps).toFixed(5));
+  const times = Array.from({ length: bakedCount + 1 }, (_, index) => +(index * dt).toFixed(5));
   const tracks = [
     ...Object.entries(rotations).map(([name, values]) => new QuaternionKeyframeTrack(`${name}.quaternion`, times, flatten(values))),
     ...Object.entries(positions).map(([name, values]) => new VectorKeyframeTrack(`${name}.position`, times, flatten(values))),
@@ -407,7 +509,12 @@ function retarget(character, capture) {
     track.times = track.times.map(value => +value.toFixed(5));
     track.values = track.values.map(value => +value.toFixed(5));
   }
-  return { clip, speed: +speed.toFixed(3), source: capture.id };
+  const startPhases = leadingFoot.map((samples, index) => {
+    const best = samples.reduce((lowest, sample) => sample.score < lowest.score ? sample : lowest,
+      { index: Math.round(index * .5 * bakedCount), score: Infinity });
+    return +(best.index / bakedCount).toFixed(4);
+  });
+  return { clip, speed: +speed.toFixed(3), source: capture.id, startPhases };
 }
 
 const motions = await Promise.all(captures.map(readCapture));

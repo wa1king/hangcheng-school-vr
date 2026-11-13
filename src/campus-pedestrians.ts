@@ -1,11 +1,11 @@
 import {
-  AnimationClip, AnimationMixer, Box3, CanvasTexture, Color, Group, MathUtils, Mesh, MeshBasicMaterial,
-  MeshStandardMaterial, PlaneGeometry, Quaternion, Vector3, type Object3D,
+  AnimationClip, AnimationMixer, Box3, CanvasTexture, Group, MathUtils, Mesh, MeshBasicMaterial,
+  PlaneGeometry, Quaternion, Vector3, type Object3D,
 } from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
-import { styleCampusCharacter, type CampusPersonRole } from './campus-character-style.ts';
+import { prepareCampusWardrobe, styleCampusCharacter, styleStreetCharacter, type CampusPersonRole } from './campus-character-style.ts';
 import { createCampusNavigation, type CampusNavigationRoute } from './campus-npc-navigation.ts';
 
 export type StreetPeopleRoute = {
@@ -20,8 +20,8 @@ export type CampusPeopleRoute = CampusNavigationRoute & {
   facing?: number;
 };
 
-type WalkClip = { clip: AnimationClip; speed: number };
-type MotionFile = Record<string, { clip: Parameters<typeof AnimationClip.parse>[0]; speed: number }[]>;
+type WalkClip = { clip: AnimationClip; speed: number; startPhases?: [number, number] };
+type MotionFile = Record<string, (Omit<WalkClip, 'clip'> & { clip: Parameters<typeof AnimationClip.parse>[0] })[]>;
 type PersonAsset = { asset: GLTF; walks: WalkClip[]; height: number; ground: number };
 
 async function loadWalkMocap(manifestURL: URL, motionPath: string | undefined) {
@@ -67,7 +67,28 @@ function createContactShadow() {
   }) };
 }
 
-const variants = [0x9eb3af, 0xc5d4e2, 0xb59687, 0x9caaa0, 0xc7aebb, 0xa2b4ce];
+function createGaitTransition(walk: NonNullable<ReturnType<AnimationMixer['clipAction']>>, index: number,
+  startPhases: [number, number] = [.02, .52]) {
+  let active = false;
+  let belowSpeed = 0;
+  let blend = 0;
+  let leadFoot = index % 2;
+  return (dt: number, speed: number) => {
+    belowSpeed = speed < .12 ? belowSpeed + dt : 0;
+    if (!active && speed > .22) {
+      active = true;
+      if (blend < .04) {
+        walk.time = walk.getClip().duration * startPhases[leadFoot];
+        leadFoot = 1 - leadFoot;
+      }
+    } else if (active && belowSpeed > .12) {
+      active = false;
+    }
+    const delta = dt / .32;
+    blend = active ? Math.min(1, blend + delta) : Math.max(0, blend - delta);
+    return blend * blend * (3 - 2 * blend);
+  };
+}
 
 function setPedestrianShadows(character: Object3D) {
   character.traverse(object => {
@@ -104,17 +125,7 @@ function pedestrian(person: PersonAsset, route: StreetPeopleRoute, index: number
   const strolling = walkClip(person, 1.19 + (index % 3) * .07, character.scale.x);
   const crossingWalk = walkClip(person, 1.7, character.scale.x, true);
   const strollSpeed = strolling.speed * character.scale.x * (.94 + (index % 3) * .04);
-  const shirtTint = new Color(variants[index % 6]).lerp(new Color(0xffffff), .4);
-  character.traverse(object => {
-    if (!(object instanceof Mesh)) return;
-    const tint = (material: typeof object.material) => {
-      if (!(material instanceof MeshStandardMaterial) || !/plum satin|original top/.test(material.name)) return material;
-      const shirt = material.clone();
-      shirt.color.multiplyScalar(1.12).multiply(shirtTint);
-      return shirt;
-    };
-    object.material = Array.isArray(object.material) ? object.material.map(tint) : tint(object.material);
-  });
+  styleStreetCharacter(character, index);
   setPedestrianShadows(character);
   attachCharacter(root, character, shadow);
 
@@ -127,8 +138,9 @@ function pedestrian(person: PersonAsset, route: StreetPeopleRoute, index: number
   idle.play();
   walk.setEffectiveWeight(0).play();
   brisk.setEffectiveWeight(0).play();
-  let walkBlend = 0;
+  const blendGait = createGaitTransition(walk, index, strolling.startPhases);
   let crossingBlend = 0;
+  let previousCrossing = false;
 
   function isCrossing() {
     return crossingStart !== undefined && crossingEnd !== undefined &&
@@ -177,10 +189,16 @@ function pedestrian(person: PersonAsset, route: StreetPeopleRoute, index: number
           }
         }
       }
-      walkBlend = MathUtils.damp(walkBlend, MathUtils.smoothstep(speed, .08, .62), 12, dt);
+      const groundSpeed = dt > 0 ? travel / dt : 0;
+      const walkBlend = blendGait(dt, groundSpeed);
+      if (walk !== brisk && crossing !== previousCrossing) {
+        const from = crossing ? walk : brisk;
+        const to = crossing ? brisk : walk;
+        to.time = (from.time / from.getClip().duration) * to.getClip().duration;
+        previousCrossing = crossing;
+      }
       crossingBlend = MathUtils.damp(crossingBlend, crossing ? 1 : 0, 9, dt);
       idle.setEffectiveWeight(1 - walkBlend);
-      const groundSpeed = dt > 0 ? travel / dt : 0;
       if (walk === brisk) {
         walk.setEffectiveWeight(walkBlend);
         walk.setEffectiveTimeScale(groundSpeed / (strolling.speed * character.scale.x));
@@ -225,6 +243,7 @@ function campusActor(person: PersonAsset, route: CampusPeopleRoute, index: numbe
   walk.time = (index * .43) % walk.getClip().duration;
   idle.play();
   walk.setEffectiveWeight(0).play();
+  const blendGait = createGaitTransition(walk, index, walking.startPhases);
 
   const head = character.getObjectByName('head');
   const arm = route.role === 'volunteer' ? character.getObjectByName('lowerarm_r') : undefined;
@@ -233,7 +252,6 @@ function campusActor(person: PersonAsset, route: CampusPeopleRoute, index: numbe
   const inverse = new Quaternion();
   const offset = index * 2.399963;
 
-  let stride = 0;
   let animationElapsed = 0;
   let animationDistance = 0;
   mixer.update(0);
@@ -241,7 +259,7 @@ function campusActor(person: PersonAsset, route: CampusPeopleRoute, index: numbe
   return {
     root,
     update(dt: number, timeMs: number, cameraPosition?: Vector3) {
-      const { speed, turning } = navigate(dt);
+      const { speed, glance: lookAtStop } = navigate(dt);
       const distanceSq = cameraPosition ? root.position.distanceToSquared(cameraPosition) : 0;
       root.visible = distanceSq < 170 ** 2;
       if (!root.visible) {
@@ -251,22 +269,23 @@ function campusActor(person: PersonAsset, route: CampusPeopleRoute, index: numbe
       animationElapsed += dt;
       // Integrating travel at every navigation tick keeps stride phase matched
       // to ground motion even when a distant rig is posed less frequently.
-      const turnPace = .8 * turning;
-      animationDistance += Math.max(speed, turnPace) * dt;
+      animationDistance += speed * dt;
       const interval = distanceSq < 40 ** 2 ? 0 : distanceSq < 85 ** 2 ? 1 / 24 : 1 / 12;
       if (animationElapsed < interval || animationElapsed <= 0) return;
 
-      stride = MathUtils.damp(stride, MathUtils.smoothstep(Math.max(speed, turnPace), .06, .56), 10, animationElapsed);
+      const averageSpeed = animationDistance / animationElapsed;
+      const stride = blendGait(animationElapsed, averageSpeed);
       idle.setEffectiveWeight(1 - stride);
       walk.setEffectiveWeight(stride);
-      walk.setEffectiveTimeScale(animationDistance / (animationElapsed * nativePace));
+      walk.setEffectiveTimeScale(averageSpeed / nativePace);
       // Undo our offsets before sampling the next pose, including unchanged tracks.
       head?.quaternion.multiply(inverse.copy(headOffset).invert());
       arm?.quaternion.multiply(inverse.copy(armOffset).invert());
       mixer.update(animationElapsed);
       animationElapsed = animationDistance = 0;
       const time = timeMs * .001;
-      const glance = (Math.sin(time * .98 + offset) * .16 + Math.sin(time * .47 + offset) * .12) * (1 - stride);
+      const glance = (lookAtStop + Math.sin(time * .98 + offset) * .10
+        + Math.sin(time * .47 + offset) * .07) * (1 - stride);
       headOffset.setFromAxisAngle(upright, glance);
       head?.quaternion.multiply(headOffset);
       if (arm) {
@@ -288,13 +307,16 @@ export async function loadStreetPeople(root: Object3D, manifestURL: URL, routes:
     const walks = (await motion)?.[name]?.map(entry => ({
       clip: AnimationClip.parse(entry.clip),
       speed: entry.speed,
+      startPhases: entry.startPhases,
     })) ?? [];
     return { asset, height: max.y - min.y, ground: min.y, walks };
   }));
+  prepareCampusWardrobe(cast[1].asset.scene);
   const shadow = createContactShadow();
   const people = routes.map((route, index) => pedestrian(cast[index % cast.length], route, index, shadow));
   const campus = campusPeople.filter(route => route.points.length > 0).map((route, index) =>
-    campusActor(cast[route.role === 'guard' ? 1 : index % cast.length], route, index, shadow));
+    campusActor(cast[route.role === 'guard' || (route.role === 'teacher' && index % 3 === 2)
+      ? 1 : index % cast.length], route, index, shadow));
   for (const person of [...people, ...campus]) root.add(person.root);
   return (dt: number, timeMs: number, canCross: boolean, cameraPosition?: Vector3) => {
     for (const person of people) person.update(dt, timeMs, canCross);

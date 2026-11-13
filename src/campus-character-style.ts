@@ -1,133 +1,152 @@
 import {
-  BufferGeometry, Color, CylinderGeometry, DoubleSide, Float32BufferAttribute, Group, Mesh, MeshStandardMaterial,
-  type Material, type Object3D,
+  BufferGeometry, Color, CylinderGeometry, DoubleSide, Float32BufferAttribute, FrontSide, Group, Mesh, MeshStandardMaterial,
+  type Material, type Object3D, type Side,
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { dressInShirt } from './campus-shirt.ts';
 
-export type CampusPersonRole = 'pupil' | 'volunteer' | 'guard' | 'adult';
+export { prepareCampusWardrobe } from './campus-shirt.ts';
 
-const adultShirts = [0x8493a1, 0x948575, 0x4d6968, 0xb29b9d, 0xc2b9a6, 0x536b88];
+export type CampusPersonRole = 'pupil' | 'volunteer' | 'guard' | 'adult' | 'teacher';
+const blue = 0x2652b7;
+const white = 0xf2f1e9;
+const teacherShirts = [0xdad6c7, 0xb5cfde, 0x293d54, 0x445263, 0xf0dda9, 0x9aa7a2];
+const streetShirts = [0x8493a1, 0x948575, 0x4d6968, 0xb29b9d, 0xc2b9a6, 0x536b88];
 const backpackColors = [0x344c66, 0x715553, 0x415b55, 0x68708a];
-const clothing = new WeakMap<Material, Map<string, Material>>();
+const shirts = new Map<string, MeshStandardMaterial>();
+const collars = new Map<number, [Material, Material]>();
 
-type Outfit = {
-  main: number;
-  accent: number;
-  trim: number;
-};
-
-const uniforms: Record<Exclude<CampusPersonRole, 'adult'>, Outfit> = {
-  pupil: { main: 0xe7e7dc, accent: 0x275181, trim: 0xc5cdd3 },
-  volunteer: { main: 0xb92e31, accent: 0x5e625e, trim: 0xb9b7a9 },
-  guard: { main: 0x314158, accent: 0x242e3e, trim: 0xc7af76 },
-};
-
-function tailorShirt(material: MeshStandardMaterial, role: Exclude<CampusPersonRole, 'adult'>, woman: boolean) {
-  const outfit = uniforms[role];
-  const trim = new Color(outfit.trim);
-  const accent = new Color(outfit.accent);
-  material.color.setHex(outfit.main);
-  material.map = null;
-  material.metalness = 0;
-  material.roughness = .82;
-  material.onBeforeCompile = shader => {
-    shader.uniforms.uClothAccent = { value: accent };
-    shader.uniforms.uClothTrim = { value: trim };
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vClothRest;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvClothRest = position;');
-    shader.fragmentShader = shader.fragmentShader.replace('#include <common>', `
-      #include <common>
-      varying vec3 vClothRest;
-      uniform vec3 uClothAccent;
-      uniform vec3 uClothTrim;
-
-      float garmentBand(float value, float center, float halfWidth) {
-        float aa = max(fwidth(value) * .65, .001);
-        return 1. - smoothstep(halfWidth - aa, halfWidth + aa, abs(value - center));
-      }
-    `).replace('#include <color_fragment>', `
-      #include <color_fragment>
-      float x = abs(vClothRest.x);
-      float y = vClothRest.y;
-      float z = vClothRest.z;
-      float front = smoothstep(.015, .1, z);
-      float yoke = smoothstep(${woman ? '1.295, 1.313' : '1.329, 1.357'}, y);
-      float sleeve = smoothstep(${woman ? '.137, .151' : '.155, .173'}, x);
-      float zip = garmentBand(x, .0, .0038) * front;
-      float grain = (fract(sin(dot(floor(vClothRest.xy * 510.), vec2(17.71, 92.82))) * 31415.9) - .5)
-        * (1. - smoothstep(.001, .012, length(fwidth(vClothRest.xy))));
-      ${role === 'pupil' ? `
-        diffuseColor.rgb = mix(diffuseColor.rgb, uClothAccent, max(yoke * .92, sleeve));
-        diffuseColor.rgb = mix(diffuseColor.rgb, uClothTrim, zip * .75);
-        float piping = garmentBand(y, ${woman ? '1.295' : '1.327'}, .005);
-        diffuseColor.rgb = mix(diffuseColor.rgb, uClothTrim, piping * .70 * (1. - sleeve));
-      ` : role === 'volunteer' ? `
-        diffuseColor.rgb = mix(diffuseColor.rgb, uClothAccent, sleeve);
-        float reflective = garmentBand(y, 1.079, .011) + garmentBand(y, 1.115, .007);
-        diffuseColor.rgb = mix(diffuseColor.rgb, uClothTrim, clamp(reflective, 0., 1.) * (1. - sleeve));
-        diffuseColor.rgb *= 1. - zip * .49;
-      ` : `
-        diffuseColor.rgb = mix(diffuseColor.rgb, uClothAccent, max(.85 * yoke, zip * .68));
-        float nameBadge = garmentBand(vClothRest.x, -.081, .022) * garmentBand(y, 1.266, .012) * front;
-        diffuseColor.rgb = mix(diffuseColor.rgb, uClothTrim, nameBadge);
-      `}
-      diffuseColor.rgb *= 1. + .13 * grain;
-    `);
-  };
-  material.customProgramCacheKey = () => `campus-uniform-${role}-${woman ? 'maya' : 'sam'}`;
+function clothColor(color: number, side: Side = FrontSide) {
+  return new MeshStandardMaterial({ color, roughness: .88, side });
 }
 
-function dressedMaterial(material: Material, role: CampusPersonRole, index: number) {
-  if (!(material instanceof MeshStandardMaterial)) return material;
-  const name = material.name;
-  const top = /full-length top|original top/.test(name);
-  const trousers = /tailored trousers|original bottom/.test(name);
-  const sleeves = name === 'Maya | anatomical body.body' && (role === 'pupil' || role === 'volunteer');
-  if (!top && !sleeves && (!trousers || role === 'adult')) return material;
-  let variants = clothing.get(material);
-  if (!variants) {
-    variants = new Map();
-    clothing.set(material, variants);
+function collarFor(color: number) {
+  let materials = collars.get(color);
+  if (!materials) {
+    materials = [clothColor(color, DoubleSide), clothColor(0xf2e9da, DoubleSide)];
+    collars.set(color, materials);
   }
-  const key = role === 'adult' ? `adult-${index % adultShirts.length}` : role;
-  const existing = variants.get(key);
+  return materials;
+}
+
+function shirtFor(role: CampusPersonRole, woman: boolean, index: number) {
+  const variant = (role === 'adult' || role === 'teacher') ? index % streetShirts.length : 0;
+  const key = `shirt-${role}-${woman}-${variant}`;
+  const existing = shirts.get(key);
   if (existing) return existing;
-  const finish = material.clone();
-  if (sleeves) {
-    const cloth = new Color(role === 'pupil' ? uniforms.pupil.accent : uniforms.volunteer.accent);
-    finish.onBeforeCompile = shader => {
-      shader.uniforms.uCampusSleeve = { value: cloth };
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vCampusSleeve;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvCampusSleeve = position;');
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vCampusSleeve;\nuniform vec3 uCampusSleeve;')
-        .replace('#include <color_fragment>', `
-          #include <color_fragment>
-          float x = abs(vCampusSleeve.x);
-          float shoulder = smoothstep(.118, .148, x);
-          float cuff = 1. - smoothstep(.236, .243, x);
-          float sleeve = shoulder * cuff * (1. - smoothstep(1.407, 1.424, vCampusSleeve.y));
-          diffuseColor.rgb = mix(diffuseColor.rgb, uCampusSleeve, sleeve);
-        `);
-    };
-    finish.customProgramCacheKey = () => `campus-sleeve-${role}`;
-  } else if (!top) {
-    finish.map = null;
-    finish.color.setHex(role === 'pupil' ? 0x293c5e : role === 'guard' ? 0x252e3c : 0x4a4844);
-    finish.roughness = .84;
-  } else if (role === 'adult') {
-    finish.map = null;
-    finish.color.setHex(adultShirts[index % adultShirts.length]);
-    finish.metalness = 0;
-    finish.roughness = .81;
-  } else {
-    tailorShirt(finish, role, name.startsWith('Maya'));
+  const primary = {
+    pupil: woman ? white : blue,
+    volunteer: 0xc03a36,
+    guard: 0x394b62,
+    teacher: teacherShirts[variant],
+    adult: streetShirts[variant],
+  }[role];
+  const accent = new Color(role === 'pupil' ? (woman ? blue : white) : role === 'guard' ? 0xb6a071 : 0xe2ded2);
+  const material = clothColor(primary);
+  material.onBeforeCompile = shader => {
+    shader.uniforms.wardrobeAccent = { value: accent };
+    shader.uniforms.wardrobeEmblem = { value: new Color(0x28785c) };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `
+        #include <common>
+        attribute vec3 wardrobeSleeve;
+        varying vec3 vShirtRest;
+        varying vec3 vShirtSleeve;
+      `)
+      .replace('#include <begin_vertex>', `
+        #include <begin_vertex>
+        vShirtRest = position;
+        vShirtSleeve = wardrobeSleeve;
+      `);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `
+        #include <common>
+        varying vec3 vShirtRest;
+        varying vec3 vShirtSleeve;
+        uniform vec3 wardrobeAccent;
+        uniform vec3 wardrobeEmblem;
+      `)
+      .replace('#include <color_fragment>', `
+        #include <color_fragment>
+        float x = abs(vShirtRest.x);
+        float y = vShirtRest.y;
+        float front = smoothstep(.04, .09, vShirtRest.z);
+        float sleeve = smoothstep(${woman ? '.104, .130' : '.121, .149'}, x);
+        ${role === 'pupil' ? `
+          float outside = smoothstep(.008, .024, vShirtSleeve.x);
+          float tape = outside * sleeve * (1. - smoothstep(.015, .022, abs(vShirtSleeve.y)));
+          float cuff = sleeve * smoothstep(.76, .84, vShirtSleeve.z);
+          diffuseColor.rgb = mix(diffuseColor.rgb, wardrobeAccent, max(tape, cuff));
+          vec2 mark = (vShirtRest.xy - vec2(.080, ${woman ? '1.295' : '1.389'})) / vec2(.015, .014);
+          float crest = 1. - smoothstep(.87, 1.13, length(mark));
+          diffuseColor.rgb = mix(diffuseColor.rgb, wardrobeEmblem, crest * front * .89);
+        ` : role === 'volunteer' ? `
+          diffuseColor.rgb = mix(diffuseColor.rgb, wardrobeAccent, sleeve);
+          float band = 1. - smoothstep(.008, .013, abs(y - ${woman ? '1.100' : '1.120'}));
+          diffuseColor.rgb = mix(diffuseColor.rgb, wardrobeAccent, band * (1. - sleeve) * .80);
+          diffuseColor.rgb *= 1. - .39 * (1. - smoothstep(.002, .005, x)) * front;
+        ` : role === 'guard' ? `
+          float nameplate = (1. - smoothstep(.019, .023, abs(vShirtRest.x - .071)))
+            * (1. - smoothstep(.007, .010, abs(y - ${woman ? '1.265' : '1.360'})));
+          diffuseColor.rgb = mix(diffuseColor.rgb, wardrobeAccent, nameplate * front);
+        ` : '' }
+        vec2 detail = vShirtRest.xy * 482.;
+        float grain = fract(sin(dot(floor(detail), vec2(12.53, 78.64))) * 9317.) - .5;
+        diffuseColor.rgb *= 1. + .095 * grain * (1. - smoothstep(.35, 1.3, length(fwidth(detail))));
+      `);
+  };
+  material.customProgramCacheKey = () => `campus-shirt-${role}-${woman}`;
+  shirts.set(key, material);
+  return material;
+}
+
+const pants = new Map<string, MeshStandardMaterial>();
+const lightSneaker = clothColor(0xe8e9e2);
+const trackAnkle = clothColor(blue);
+
+function pupilTrackPants(woman: boolean) {
+  const key = woman ? 'maya' : 'sam';
+  const existing = pants.get(key);
+  if (existing) return existing;
+  const material = clothColor(blue);
+  material.onBeforeCompile = shader => {
+    shader.uniforms.wardrobeSeam = { value: new Color(white) };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vPantsRest;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvPantsRest = position;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vPantsRest;\nuniform vec3 wardrobeSeam;')
+      .replace('#include <color_fragment>', `
+        #include <color_fragment>
+        float y = vPantsRest.y;
+        float upper = ${woman ? '.203 - .024 * smoothstep(.75, .97, y)' : '.218 - .053 * smoothstep(.65, 1., y)'};
+        float side = ${woman ? 'mix(.239, upper, smoothstep(.31, .51, y))' : 'mix(.256, upper, smoothstep(.20, .55, y))'};
+        float outerLeg = smoothstep(side - .046, side - .033, abs(vPantsRest.x));
+        float z = vPantsRest.z - ${woman ? 'mix(.018, .051, smoothstep(.30, .55, y))' : 'mix(.015, .027, smoothstep(.44, .62, y))'};
+        float stitch = 1. - smoothstep(.010, .013, abs(abs(z) - .014));
+        diffuseColor.rgb = mix(diffuseColor.rgb, wardrobeSeam, outerLeg * stitch * .96);
+      `);
+  };
+  material.customProgramCacheKey = () => `campus-track-pants-${key}`;
+  pants.set(key, material);
+  return material;
+}
+
+const trousersColors = {
+  teacher: clothColor(0x4d535b),
+  guard: clothColor(0x273447),
+  volunteer: clothColor(0x414749),
+};
+
+function dressLowerBody(material: Material, role: CampusPersonRole, woman: boolean) {
+  if (/tailored trousers|original bottom/.test(material.name)) {
+    if (role === 'pupil') return pupilTrackPants(woman);
+    return role === 'adult' ? material : trousersColors[role];
   }
-  variants.set(key, finish);
-  return finish;
+  if (role === 'pupil' && /sneaker|\bshoe/i.test(material.name)) return lightSneaker;
+  if (role === 'pupil' && material.name === 'Original dark ankle lining') return trackAnkle;
+  return material;
 }
 
 const backpackBody = new RoundedBoxGeometry(.245, .31, .12, 3, .038);
@@ -193,15 +212,27 @@ function addBackpack(character: Object3D, index: number, woman: boolean) {
   spine.add(new Mesh(woman ? mayaStraps : samStraps, backpackTrim[color]));
 }
 
-export function styleCampusCharacter(character: Object3D, role: CampusPersonRole, index: number) {
+function dressCharacter(character: Object3D, role: CampusPersonRole, index: number) {
   const woman = character.children.some(node => node.name.startsWith('Maya'));
+  const color = role === 'pupil' ? (woman ? blue : white)
+    : role === 'teacher' ? teacherShirts[index % teacherShirts.length] : undefined;
+  dressInShirt(character, woman, shirtFor(role, woman, index), color === undefined ? undefined : collarFor(color));
   character.traverse(node => {
     if (!(node instanceof Mesh)) return;
     node.receiveShadow = true;
     node.material = Array.isArray(node.material)
-      ? node.material.map(material => dressedMaterial(material, role, index))
-      : dressedMaterial(node.material, role, index);
+      ? node.material.map(material => dressLowerBody(material, role, woman))
+      : dressLowerBody(node.material, role, woman);
   });
+  return woman;
+}
+
+export function styleStreetCharacter(character: Object3D, index: number) {
+  dressCharacter(character, 'adult', index);
+}
+
+export function styleCampusCharacter(character: Object3D, role: CampusPersonRole, index: number) {
+  const woman = dressCharacter(character, role, index);
   if (role === 'pupil') {
     character.getObjectByName('head')?.scale.multiplyScalar(1.065);
     if (index % 5 !== 4) addBackpack(character, index, woman);

@@ -17,7 +17,18 @@ const angleDelta = (from: number, to: number) => MathUtils.euclideanModulo(to - 
 
 /** Give each walkable corridor a rounded centreline between its marked destinations. */
 function buildPath(points: Vector3[], stops: CampusStop[], loop: boolean) {
-  const samples = [points[0]];
+  function corner(index: number) {
+    const point = points[index];
+    const previous = points[index - 1] ?? points.at(-1)!;
+    const next = points[index + 1] ?? points[0];
+    const reach = Math.min(.85, point.distanceTo(previous) * .26, point.distanceTo(next) * .26);
+    const entry = point.clone().lerp(previous, reach / Math.max(1e-5, point.distanceTo(previous)));
+    const exit = point.clone().lerp(next, reach / Math.max(1e-5, point.distanceTo(next)));
+    return (t: number) => entry.clone().multiplyScalar((1 - t) ** 2)
+      .addScaledVector(point, 2 * t * (1 - t)).addScaledVector(exit, t * t);
+  }
+  const origin = loop ? corner(0) : undefined;
+  const samples = [origin?.(.5) ?? points[0]];
   const distances = [0];
   const marks = new Map([[0, 0]]);
   const stopsAt = new Set(stops.map(stop => stop.point));
@@ -27,31 +38,25 @@ function buildPath(points: Vector3[], stops: CampusStop[], loop: boolean) {
     samples.push(point);
     distances.push(distances[distances.length - 1] + length);
   }
+  if (origin) for (let step = 5; step <= 8; step++) append(origin(step / 8));
   for (let i = 1; i < points.length; i++) {
-    const point = points[i];
-    const previous = points[i - 1];
-    const next = points[i + 1] ?? (loop ? points[0] : undefined);
-    if (next && !stopsAt.has(i)) {
-      const reach = Math.min(.85, point.distanceTo(previous) * .26, point.distanceTo(next) * .26);
-      const entry = point.clone().lerp(previous, reach / Math.max(1e-5, point.distanceTo(previous)));
-      const exit = point.clone().lerp(next, reach / Math.max(1e-5, point.distanceTo(next)));
-      append(entry);
-      for (let sample = 1; sample <= 8; sample++) {
-        const t = sample / 8;
-        append(entry.clone().multiplyScalar((1 - t) ** 2)
-          .addScaledVector(point, 2 * t * (1 - t)).addScaledVector(exit, t * t));
+    if (loop || i < points.length - 1) {
+      const arc = corner(i);
+      for (let step = 0; step <= 8; step++) {
+        append(arc(step / 8));
+        if (step === 4 && stopsAt.has(i)) marks.set(i, distances[distances.length - 1]);
       }
     } else {
-      append(point);
+      append(points[i]);
       marks.set(i, distances[distances.length - 1]);
     }
   }
-  if (loop) append(points[0]);
+  if (origin) for (let step = 0; step <= 4; step++) append(origin(step / 8));
   return { samples, distances, marks, length: distances[distances.length - 1] };
 }
 
 export function createCampusNavigation(root: Object3D, route: CampusNavigationRoute, index: number, naturalPace: number) {
-  const state = { speed: 0, turning: 0, stopped: true };
+  const state = { speed: 0, glance: 0 };
   const points = route.points.map(point => new Vector3(...point));
   root.position.copy(points[0]);
   root.rotation.y = route.facing ?? (points[1] ? yawTo(points[0], points[1]) : 0);
@@ -66,6 +71,8 @@ export function createCampusNavigation(root: Object3D, route: CampusNavigationRo
   }
   const path = buildPath(points, stops, loop);
   if (path.length <= 1e-5) return (_dt: number) => state;
+  root.position.copy(path.samples[0]);
+  root.rotation.y = yawTo(path.samples[0], path.samples[1]);
   const waitPoints = stops.map(stop => ({ ...stop, distance: path.marks.get(stop.point)! }))
     .filter(stop => Number.isFinite(stop.distance))
     .sort((a, b) => a.distance - b.distance);
@@ -88,7 +95,7 @@ export function createCampusNavigation(root: Object3D, route: CampusNavigationRo
   const turnAfter = new Vector3();
 
   function sample(s: number, position: Vector3) {
-    const clamped = MathUtils.clamp(s, 0, path.length);
+    const clamped = loop ? MathUtils.euclideanModulo(s, path.length) : MathUtils.clamp(s, 0, path.length);
     let left = 0;
     let right = path.distances.length - 1;
     while (right - left > 1) {
@@ -100,10 +107,21 @@ export function createCampusNavigation(root: Object3D, route: CampusNavigationRo
     return position.lerpVectors(path.samples[left], path.samples[right], t);
   }
 
-  function tangentYaw() {
-    sample(distance - leg * .16, turnBefore);
-    sample(distance + leg * .28, turnAfter);
+  function tangentYaw(at: number) {
+    sample(at - leg * .16, turnBefore);
+    sample(at + leg * .28, turnAfter);
     return yawTo(turnBefore, turnAfter);
+  }
+
+  function turnPace(yaw: number, remaining: number) {
+    // An actor can face the right way on a tight arc and still turn too fast
+    // to plant a foot. Look ahead along the path and brake before the arc.
+    const ahead = Math.min(remaining, .55);
+    if (ahead < .05) return Infinity;
+    const middleYaw = tangentYaw(distance + leg * ahead * .5);
+    const futureYaw = tangentYaw(distance + leg * ahead);
+    const bend = Math.max(Math.abs(angleDelta(yaw, middleYaw)), Math.abs(angleDelta(middleYaw, futureYaw)));
+    return .82 * ahead * .5 / Math.max(.001, bend);
   }
 
   function arrive() {
@@ -123,10 +141,9 @@ export function createCampusNavigation(root: Object3D, route: CampusNavigationRo
     if (dt <= 0) return state;
     elapsed += dt;
     const waiting = rest > 0;
-    const desiredYaw = waiting ? waitFacing : tangentYaw();
+    const desiredYaw = tangentYaw(distance);
     const turn = angleDelta(root.rotation.y, desiredYaw);
-    const rotatingAtRest = Math.abs(turn) > .045 && (waiting || velocity < .19);
-    const turnRate = waiting ? 1.4 : 3.25;
+    const turnRate = waiting ? 1.2 : 3.25;
     const desiredTurn = MathUtils.clamp(turn * 9, -turnRate, turnRate);
     angleStep = MathUtils.damp(angleStep, desiredTurn, 16, dt);
     root.rotation.y += angleStep * dt;
@@ -136,10 +153,11 @@ export function createCampusNavigation(root: Object3D, route: CampusNavigationRo
     } else {
       const remaining = Math.abs(waitPoints[target].distance - distance);
       const cruise = pace * (1 + .045 * Math.sin(elapsed * .44 + (route.group ?? index) * 2.3));
-      const brakingPace = Math.sqrt(2 * 1.5 * remaining);
-      const cornerPace = cruise * (1 - .51 * MathUtils.smoothstep(Math.abs(turn), .22, .82));
+      const brakingPace = Math.sqrt(2 * 1.3 * remaining);
+      const alignedPace = cruise * (1 - .51 * MathUtils.smoothstep(Math.abs(turn), .22, .82));
+      const cornerPace = Math.min(alignedPace, Math.max(.29, turnPace(desiredYaw, remaining)));
       const requested = Math.abs(turn) > .73 && velocity < .19 ? 0 : Math.min(cornerPace, brakingPace);
-      velocity = MathUtils.damp(velocity, requested, requested > velocity ? 4.2 : 9.5, dt);
+      velocity = Math.min(brakingPace, MathUtils.damp(velocity, requested, requested > velocity ? 4.2 : 9.5, dt));
       const travel = Math.min(remaining, velocity * dt);
       distance += leg * travel;
       sample(distance, root.position);
@@ -149,9 +167,8 @@ export function createCampusNavigation(root: Object3D, route: CampusNavigationRo
         velocity = 0;
       }
     }
-    state.stopped = waiting;
-    state.turning = MathUtils.damp(state.turning,
-      rotatingAtRest ? Math.min(.39, Math.abs(angleStep) * .16) : 0, 15, dt);
+    const glance = waiting ? MathUtils.clamp(angleDelta(root.rotation.y, waitFacing), -.47, .47) : 0;
+    state.glance = MathUtils.damp(state.glance, glance, 4, dt);
     return state;
   };
 }
