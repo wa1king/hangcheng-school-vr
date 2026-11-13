@@ -4,7 +4,12 @@ import { createCampusTraffic, streetTrafficPhase } from './campus-traffic.ts';
 import { moveStreetVehicles, type StreetLane } from './street-vehicle-motion.ts';
 import { loadStreetVehicleModels } from './street-vehicle-model.ts';
 
-type StreetRoutes = { vehicles: StreetLane[]; people: StreetPeopleRoute[]; campusPeople?: CampusPeopleRoute[] };
+type StreetRoutes = {
+  vehicles: StreetLane[];
+  people: StreetPeopleRoute[];
+  campusPeople?: CampusPeopleRoute[];
+  motion?: string;
+};
 
 export function createStreetLife(context: Object3D, manifestURL: URL, routesPath: string | undefined,
   lightVehicles: (vehicles: Object3D) => void) {
@@ -34,7 +39,7 @@ export function createStreetLife(context: Object3D, manifestURL: URL, routesPath
         lightVehicles(vehicles);
       }),
       loadRoutes.then(async routes => {
-        updatePeople = await loadStreetPeople(people, manifestURL, routes.people, routes.campusPeople);
+        updatePeople = await loadStreetPeople(people, manifestURL, routes.people, routes.campusPeople, routes.motion);
       }),
     ]).then(results => {
       if (updateVehicles) context.add(vehicles);

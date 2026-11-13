@@ -1,11 +1,12 @@
 import {
-  AnimationMixer, Box3, CanvasTexture, Color, Group, MathUtils, Mesh, MeshBasicMaterial,
+  AnimationClip, AnimationMixer, Box3, CanvasTexture, Color, Group, MathUtils, Mesh, MeshBasicMaterial,
   MeshStandardMaterial, PlaneGeometry, Quaternion, Vector3, type Object3D,
 } from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
 import { styleCampusCharacter, type CampusPersonRole } from './campus-character-style.ts';
+import { createCampusNavigation, type CampusNavigationRoute } from './campus-npc-navigation.ts';
 
 export type StreetPeopleRoute = {
   points: [number, number, number][];
@@ -13,12 +14,38 @@ export type StreetPeopleRoute = {
   crossingEnd?: number;
 };
 
-export type CampusPeopleRoute = {
-  points: [number, number, number][];
+export type CampusPeopleRoute = CampusNavigationRoute & {
   role: CampusPersonRole;
   height: number;
   facing?: number;
 };
+
+type WalkClip = { clip: AnimationClip; speed: number };
+type MotionFile = Record<string, { clip: Parameters<typeof AnimationClip.parse>[0]; speed: number }[]>;
+type PersonAsset = { asset: GLTF; walks: WalkClip[]; height: number; ground: number };
+
+async function loadWalkMocap(manifestURL: URL, motionPath: string | undefined) {
+  if (!motionPath) return undefined;
+  try {
+    const response = await fetch(new URL(motionPath, manifestURL));
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.json() as MotionFile;
+  } catch (error) {
+    console.warn('步行动捕载入失败，使用备用步态', error);
+    return undefined;
+  }
+}
+
+function walkClip({ asset, walks }: PersonAsset, pace: number, scale: number, brisk = false): WalkClip {
+  if (walks.length) {
+    const distance = (walk: WalkClip) => Math.abs(Math.log(walk.speed * scale / pace));
+    return walks.reduce((best, walk) => distance(walk) < distance(best) ? walk : best);
+  }
+  return {
+    clip: asset.animations.find(clip => clip.name === (brisk ? 'Walk_Brisk' : 'Walk_Relaxed'))!,
+    speed: brisk ? 1.7 : 1.3,
+  };
+}
 
 function createContactShadow() {
   const canvas = document.createElement('canvas');
@@ -55,8 +82,9 @@ function attachCharacter(root: Group, character: Object3D, shadow: ReturnType<ty
   root.add(character, contact);
 }
 
-function pedestrian(asset: GLTF, route: StreetPeopleRoute, index: number,
+function pedestrian(person: PersonAsset, route: StreetPeopleRoute, index: number,
   shadow: ReturnType<typeof createContactShadow>) {
+  const { asset, ground } = person;
   const points = route.points.map(point => new Vector3(...point));
   const last = points.length - 1;
   const crossingStart = route.waitAt;
@@ -68,11 +96,14 @@ function pedestrian(asset: GLTF, route: StreetPeopleRoute, index: number,
   let speed = 0;
   let look = 0;
   let turning = false;
-  const strollSpeed = 1.12 + (index % 3) * .075;
   const root = new Group();
   root.name = `street-pedestrian-${index + 1}`;
   const character = clone(asset.scene);
   character.scale.setScalar([.96, 1, 1.02, .98, 1, .98][index % 6]);
+  character.position.y -= ground * character.scale.x;
+  const strolling = walkClip(person, 1.19 + (index % 3) * .07, character.scale.x);
+  const crossingWalk = walkClip(person, 1.7, character.scale.x, true);
+  const strollSpeed = strolling.speed * character.scale.x * (.94 + (index % 3) * .04);
   const shirtTint = new Color(variants[index % 6]).lerp(new Color(0xffffff), .4);
   character.traverse(object => {
     if (!(object instanceof Mesh)) return;
@@ -89,13 +120,15 @@ function pedestrian(asset: GLTF, route: StreetPeopleRoute, index: number,
 
   const mixer = new AnimationMixer(character);
   const idle = mixer.clipAction(asset.animations.find(clip => clip.name === 'Idle_Standing')!);
-  const walk = mixer.clipAction(asset.animations.find(clip => clip.name === 'Walk_Relaxed')!);
-  const brisk = mixer.clipAction(asset.animations.find(clip => clip.name === 'Walk_Brisk')!);
+  const walk = mixer.clipAction(strolling.clip);
+  const brisk = mixer.clipAction(crossingWalk.clip);
   idle.time = index * .61;
   walk.time = index * .31;
   idle.play();
   walk.setEffectiveWeight(0).play();
   brisk.setEffectiveWeight(0).play();
+  let walkBlend = 0;
+  let crossingBlend = 0;
 
   function isCrossing() {
     return crossingStart !== undefined && crossingEnd !== undefined &&
@@ -129,9 +162,11 @@ function pedestrian(asset: GLTF, route: StreetPeopleRoute, index: number,
       const targetSpeed = ready && !turning ? (crossing ? 1.7 : strollSpeed) : 0;
       if (ready && leavingCurb && !turning && dt > 0) lastCrossing = timeMs;
       speed = MathUtils.damp(speed, targetSpeed, targetSpeed ? 8 : 14, dt);
+      let travel = 0;
       if (targetSpeed > 0) {
         const length = points[segment].distanceTo(points[segment + leg]);
-        progress = Math.min(1, progress + speed * dt / length);
+        travel = Math.min((1 - progress) * length, speed * dt);
+        progress = Math.min(1, progress + travel / length);
         place();
         if (progress === 1) {
           segment += leg;
@@ -142,32 +177,35 @@ function pedestrian(asset: GLTF, route: StreetPeopleRoute, index: number,
           }
         }
       }
-      const moving = MathUtils.clamp(speed / (crossing ? 1.7 : strollSpeed), 0, 1);
-      idle.setEffectiveWeight(1 - moving);
-      walk.setEffectiveWeight(crossing ? 0 : moving);
-      walk.setEffectiveTimeScale(speed / 1.3 / character.scale.x);
-      brisk.setEffectiveWeight(crossing ? moving : 0);
-      brisk.setEffectiveTimeScale(speed / 1.7 / character.scale.x);
+      walkBlend = MathUtils.damp(walkBlend, MathUtils.smoothstep(speed, .08, .62), 12, dt);
+      crossingBlend = MathUtils.damp(crossingBlend, crossing ? 1 : 0, 9, dt);
+      idle.setEffectiveWeight(1 - walkBlend);
+      const groundSpeed = dt > 0 ? travel / dt : 0;
+      if (walk === brisk) {
+        walk.setEffectiveWeight(walkBlend);
+        walk.setEffectiveTimeScale(groundSpeed / (strolling.speed * character.scale.x));
+      } else {
+        walk.setEffectiveWeight(walkBlend * (1 - crossingBlend));
+        brisk.setEffectiveWeight(walkBlend * crossingBlend);
+        walk.setEffectiveTimeScale(groundSpeed / (strolling.speed * character.scale.x));
+        brisk.setEffectiveTimeScale(groundSpeed / (crossingWalk.speed * character.scale.x));
+      }
       mixer.update(dt);
     },
   };
 }
 
-type CampusActorAsset = { asset: GLTF; height: number; ground: number };
 const upright = new Vector3(0, 1, 0);
 const bend = new Vector3(1, 0, 0);
 
-function campusActor({ asset, height, ground }: CampusActorAsset, route: CampusPeopleRoute, index: number,
+function campusActor(person: PersonAsset, route: CampusPeopleRoute, index: number,
   shadow: ReturnType<typeof createContactShadow>) {
+  const { asset, height, ground } = person;
   const root = new Group();
-  const points = route.points.map(point => new Vector3(...point));
-  const last = points.length - 1;
   const scale = route.height / height;
-  const start = points[0];
   root.name = `campus-npc-${index + 1}`;
   root.userData.role = route.role;
-  root.userData.walkingRoute = last > 0;
-  root.position.copy(start);
+  root.userData.walkingRoute = route.points.length > 1;
 
   const character = clone(asset.scene);
   styleCampusCharacter(character, route.role, index);
@@ -178,7 +216,11 @@ function campusActor({ asset, height, ground }: CampusActorAsset, route: CampusP
 
   const mixer = new AnimationMixer(character);
   const idle = mixer.clipAction(asset.animations.find(clip => clip.name === 'Idle_Standing')!);
-  const walk = mixer.clipAction(asset.animations.find(clip => clip.name === 'Walk_Relaxed')!);
+  const desiredPace = route.pace ?? (route.role === 'pupil' ? .88 : 1.14) + (index % 4) * .058;
+  const walking = walkClip(person, desiredPace, scale);
+  const walk = mixer.clipAction(walking.clip);
+  const nativePace = walking.speed * scale;
+  const navigate = createCampusNavigation(root, route, index, nativePace);
   idle.time = (index * .73) % idle.getClip().duration;
   walk.time = (index * .43) % walk.getClip().duration;
   idle.play();
@@ -191,63 +233,38 @@ function campusActor({ asset, height, ground }: CampusActorAsset, route: CampusP
   const inverse = new Quaternion();
   const offset = index * 2.399963;
 
-  let leg = 1;
-  let segment = 0;
-  let distance = 0;
-  let speed = 0;
-  let turningStep = 0;
-  let pause = index % 4 * .21;
+  let stride = 0;
   let animationElapsed = 0;
-  const pace = (route.role === 'pupil' ? .95 : 1.13) + index % 4 * .052;
-  const initialYaw = last > 0 ? Math.atan2(points[1].x - start.x, points[1].z - start.z) : (route.facing ?? 0);
-  root.rotation.y = initialYaw;
+  let animationDistance = 0;
   mixer.update(0);
-
-  function advancePath(dt: number) {
-    const a = points[segment];
-    const b = points[segment + leg];
-    const length = a.distanceTo(b);
-    const targetYaw = Math.atan2(b.x - a.x, b.z - a.z);
-    const turn = MathUtils.euclideanModulo(targetYaw - root.rotation.y + Math.PI, Math.PI * 2) - Math.PI;
-    const rest = pause > 0;
-    pause = Math.max(0, pause - dt);
-    if (!rest) root.rotation.y += MathUtils.clamp(turn, -3.4 * dt, 3.4 * dt);
-    turningStep = MathUtils.damp(turningStep, rest ? 0 : MathUtils.clamp((Math.abs(turn) - .30) * 1.8, 0, .48), 15, dt);
-    const remaining = length - distance;
-    const endpoint = segment + leg === 0 || segment + leg === last;
-    const targetSpeed = rest || Math.abs(turn) > .60 ? 0 : Math.min(pace, endpoint ? .24 + Math.sqrt(3 * remaining) : pace);
-    speed = MathUtils.damp(speed, targetSpeed, targetSpeed > speed ? 6 : 12, dt);
-    if (targetSpeed <= 0) return;
-    distance = Math.min(length, distance + speed * dt);
-    root.position.lerpVectors(a, b, length > 1e-6 ? distance / length : 1);
-    if (distance < length) return;
-    segment += leg;
-    distance = 0;
-    if (endpoint) {
-      leg *= -1;
-      pause = .65 + (index % 4) * .22;
-    }
-  }
 
   return {
     root,
     update(dt: number, timeMs: number, cameraPosition?: Vector3) {
-      if (last > 0) advancePath(dt);
+      const { speed, turning } = navigate(dt);
       const distanceSq = cameraPosition ? root.position.distanceToSquared(cameraPosition) : 0;
       root.visible = distanceSq < 170 ** 2;
-      animationElapsed = Math.min(.2, animationElapsed + dt);
+      if (!root.visible) {
+        animationElapsed = animationDistance = 0;
+        return;
+      }
+      animationElapsed += dt;
+      // Integrating travel at every navigation tick keeps stride phase matched
+      // to ground motion even when a distant rig is posed less frequently.
+      const turnPace = .8 * turning;
+      animationDistance += Math.max(speed, turnPace) * dt;
       const interval = distanceSq < 40 ** 2 ? 0 : distanceSq < 85 ** 2 ? 1 / 24 : 1 / 12;
-      if (!root.visible || animationElapsed < interval) return;
+      if (animationElapsed < interval || animationElapsed <= 0) return;
 
-      const stride = MathUtils.clamp(Math.max(speed / pace, turningStep), 0, 1);
+      stride = MathUtils.damp(stride, MathUtils.smoothstep(Math.max(speed, turnPace), .06, .56), 10, animationElapsed);
       idle.setEffectiveWeight(1 - stride);
       walk.setEffectiveWeight(stride);
-      walk.setEffectiveTimeScale(Math.max(speed / (1.3 * scale), turningStep * 1.45));
+      walk.setEffectiveTimeScale(animationDistance / (animationElapsed * nativePace));
       // Undo our offsets before sampling the next pose, including unchanged tracks.
       head?.quaternion.multiply(inverse.copy(headOffset).invert());
       arm?.quaternion.multiply(inverse.copy(armOffset).invert());
       mixer.update(animationElapsed);
-      animationElapsed = 0;
+      animationElapsed = animationDistance = 0;
       const time = timeMs * .001;
       const glance = (Math.sin(time * .98 + offset) * .16 + Math.sin(time * .47 + offset) * .12) * (1 - stride);
       headOffset.setFromAxisAngle(upright, glance);
@@ -262,18 +279,22 @@ function campusActor({ asset, height, ground }: CampusActorAsset, route: CampusP
 }
 
 export async function loadStreetPeople(root: Object3D, manifestURL: URL, routes: StreetPeopleRoute[],
-  campusPeople: CampusPeopleRoute[] = []) {
+  campusPeople: CampusPeopleRoute[] = [], motionPath?: string) {
   const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
-  const cast = await Promise.all(['maya', 'sam'].map(name =>
-    loader.loadAsync(new URL(`./street-people-${name}.glb?v=1`, manifestURL).href)));
+  const motion = loadWalkMocap(manifestURL, motionPath);
+  const cast: PersonAsset[] = await Promise.all(['maya', 'sam'].map(async name => {
+    const asset = await loader.loadAsync(new URL(`./street-people-${name}.glb?v=1`, manifestURL).href);
+    const { min, max } = new Box3().setFromObject(asset.scene, true);
+    const walks = (await motion)?.[name]?.map(entry => ({
+      clip: AnimationClip.parse(entry.clip),
+      speed: entry.speed,
+    })) ?? [];
+    return { asset, height: max.y - min.y, ground: min.y, walks };
+  }));
   const shadow = createContactShadow();
   const people = routes.map((route, index) => pedestrian(cast[index % cast.length], route, index, shadow));
-  const campusCast = cast.map(asset => {
-    const { min, max } = new Box3().setFromObject(asset.scene, true);
-    return { asset, height: max.y - min.y, ground: min.y };
-  });
   const campus = campusPeople.filter(route => route.points.length > 0).map((route, index) =>
-    campusActor(campusCast[route.role === 'guard' ? 1 : index % campusCast.length], route, index, shadow));
+    campusActor(cast[route.role === 'guard' ? 1 : index % cast.length], route, index, shadow));
   for (const person of [...people, ...campus]) root.add(person.root);
   return (dt: number, timeMs: number, canCross: boolean, cameraPosition?: Vector3) => {
     for (const person of people) person.update(dt, timeMs, canCross);

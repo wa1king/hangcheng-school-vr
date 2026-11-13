@@ -12,7 +12,7 @@
       "surroundings": true
     }
   ],
-  "streetRoutes": "./street-routes.json?v=3e5599d4dc0e",
+  "streetRoutes": "./street-routes.json?v=6ca866be2b1a",
   "collisionFromModels": true,
   "tourBoundary": [
     [

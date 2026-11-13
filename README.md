@@ -10,6 +10,8 @@
 
 校园人物、校外行人和车辆在校园首帧后载入。学子路口的信号灯、斑马线和车流使用同一套模拟时序。`tools/street_routes.py` 导出车道和过街路线，`tools/campus_people.py` 布置校内人物与步行路线。
 
+校内步行角色沿闭合路线经过不同目的地，按各自时长停留再继续。走路使用 CMU 真人动捕重定向的四种步态。浏览器按实际移动距离、角色尺寸和每段动作测得的步速推进动画。使用 `node tools/retarget-campus-mocap.mjs <BVH目录> public/scene/campus-walk-mocap.json` 重新生成步态后，再运行场景构建刷新资源版本。素材和转换出处见场景资料。
+
 从「前往」选择主教学翼、西侧活动楼、北侧教学楼或东南综合楼的入口，可以步行进楼、穿过走廊并沿楼梯到屋顶。楼内平面与主楼连廊是游览示意，教室陈设参考公开课堂照片。
 
 [打开校园漫游](https://wa1king.github.io/hangcheng-school-vr/) · [查看资料来源](https://wa1king.github.io/hangcheng-school-vr/scene/sources.html)

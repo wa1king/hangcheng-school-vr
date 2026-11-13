@@ -146,6 +146,8 @@ def manifest(dest, polygons, lines):
         return f'./{name}?v={revision}'
 
     routes = build_street_routes(lines, world)
+    if (dest / 'campus-walk-mocap.json').is_file():
+        routes['motion'] = resource('campus-walk-mocap.json')
     (dest / 'street-routes.json').write_text(json.dumps(routes, separators=(',', ':')) + '\n', encoding='utf-8')
 
     places = [location('gate', '学校正门', STAIR_CENTER, 76.6, pitch=0.22),
