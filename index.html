@@ -42,6 +42,11 @@
             <span class="move-tick move-left" aria-hidden="true">◂</span>
             <span id="move-thumb" aria-hidden="true">移动</span>
           </div>
+          <div id="lift-lever" class="lift-lever" role="group" aria-label="升降推杆，向上推起飞，向下推降落" hidden>
+            <span class="lift-end lift-up" aria-hidden="true">▲<small>飞</small></span>
+            <span class="lift-end lift-down" aria-hidden="true"><small>落</small>▼</span>
+            <span id="lift-thumb" aria-hidden="true">升降</span>
+          </div>
         </div>
         <div class="dock-centre">
           <div id="places" class="places" role="group" aria-label="前往地点" hidden></div>
@@ -56,18 +61,13 @@
         </div>
         <div class="dock-side dock-right">
           <button type="button" id="compass" class="compass" aria-label="指南针，点击转向正北" hidden>
-            <span class="compass-dial" aria-hidden="true">
+            <span class="compass-dial" aria-hidden="true"></span>
+            <span class="compass-face" aria-hidden="true">
               <b class="compass-n">北</b><b class="compass-e">东</b><b class="compass-s">南</b><b class="compass-w">西</b>
+              <span class="compass-needle"><i></i></span>
             </span>
             <span class="compass-pointer" aria-hidden="true"></span>
             <span id="compass-label" class="compass-label" aria-live="polite">朝北</span>
-          </button>
-          <div id="vertical-buttons" class="vertical-buttons" hidden>
-            <button type="button" data-lift="1" aria-label="上升">↑</button>
-            <button type="button" data-lift="-1" aria-label="下降">↓</button>
-          </div>
-          <button type="button" id="fly-toggle" class="fly-toggle" disabled aria-pressed="false">
-            <span class="fly-glyph" aria-hidden="true">✈</span><span id="fly-label">飞行</span>
           </button>
         </div>
       </div>

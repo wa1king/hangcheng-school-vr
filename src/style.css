@@ -168,43 +168,33 @@ h1 { font-size: 1.7rem; font-weight: 660; line-height: 1.18; overflow-wrap: anyw
 .move-left { left: .5rem; top: 50%; transform: translateY(-50%); }
 #move-thumb { width: 3.7rem; height: 3.7rem; display: grid; place-items: center; border-radius: 50%; border: 1px solid #eafaafba; color: var(--ink); background: var(--accent); font-size: .85rem; font-weight: 680; pointer-events: none; }
 
-.compass { flex: none; position: relative; width: 6.4rem; height: 6.4rem; padding: 0; border: 1px solid #eff6da76; border-radius: 50%; background: #16332be0; }
-.compass:hover { background: #1f3f35; }
-.compass-dial { position: absolute; inset: .35rem; border-radius: 50%; border: 1px dashed #e5f5ed45; transform: rotate(var(--turn, 0rad)); }
-.compass-dial b { position: absolute; left: 50%; top: 50%; width: 1.4rem; height: 1.4rem; margin: -.7rem; display: grid; place-items: center; font-size: .95rem; font-weight: 680; color: var(--muted); }
+/* The lever stands beside the joystick: push up to fly, down to come back to the ground. */
+.lift-lever { flex: none; position: relative; width: 3.9rem; height: 9rem; display: grid; place-items: center; border-radius: 1.95rem; border: 1px solid #eff6da76; background: #16332be0; cursor: grab; touch-action: none; }
+.lift-lever::before { content: ""; position: absolute; top: 2.2rem; bottom: 2.2rem; left: 50%; width: 2px; margin-left: -1px; background: #e5f5ed38; }
+.lift-lever:active { cursor: grabbing; }
+.lift-end { position: absolute; left: 0; right: 0; display: grid; justify-items: center; color: #e5edcd; font-size: .7rem; line-height: 1.1; pointer-events: none; }
+.lift-end small { font-size: .78rem; font-weight: 650; }
+.lift-up { top: .45rem; }
+.lift-down { bottom: .45rem; }
+#lift-thumb { position: relative; width: 3.1rem; height: 3.1rem; display: grid; place-items: center; border-radius: 50%; border: 1px solid #eafaafba; color: var(--ink); background: var(--accent); font-size: .78rem; font-weight: 680; pointer-events: none; }
+#app[data-mode="fly"] .lift-lever { border-color: var(--accent); box-shadow: 0 0 0 2px #d9f29840; }
+#app[data-mode="fly"] .lift-up { color: var(--accent); }
+
+.compass { flex: none; position: relative; width: 7.6rem; height: 7.6rem; margin-bottom: 1.5rem; padding: 0; border: 2px solid #c9b98a; border-radius: 50%; background: radial-gradient(circle at 50% 42%, #f6f1df 0%, #e9e1c6 62%, #d3c8a3 100%); box-shadow: 0 8px 26px #0a201990, inset 0 0 0 .3rem #17332bd9, inset 0 0 0 .36rem #c9b98a; }
+.compass-dial { position: absolute; inset: .5rem; border-radius: 50%; transform: rotate(var(--turn, 0rad)); background: repeating-conic-gradient(from -1deg, #37493f 0deg 2deg, transparent 2deg 45deg) ; -webkit-mask: radial-gradient(circle, transparent 0 60%, #000 60.5% 68%, transparent 68.5%); mask: radial-gradient(circle, transparent 0 60%, #000 60.5% 68%, transparent 68.5%); }
+.compass-face { position: absolute; inset: .5rem; border-radius: 50%; transform: rotate(var(--turn, 0rad)); }
+.compass-face b { position: absolute; left: 50%; top: 50%; width: 1.4rem; height: 1.4rem; margin: -.7rem; display: grid; place-items: center; font-size: 1rem; font-weight: 700; color: #2a3a32; }
 /* Each letter rides the rim and turns back upright as the dial rotates. */
-.compass-n { transform: translateY(-2.05rem) rotate(calc(var(--turn, 0rad) * -1)); color: #ff9d86 !important; }
-.compass-e { transform: translateX(2.05rem) rotate(calc(var(--turn, 0rad) * -1)); }
-.compass-s { transform: translateY(2.05rem) rotate(calc(var(--turn, 0rad) * -1)); }
-.compass-w { transform: translateX(-2.05rem) rotate(calc(var(--turn, 0rad) * -1)); }
-.compass-pointer { position: absolute; left: 50%; top: -.42rem; width: 0; height: 0; margin-left: -.42rem; border: .42rem solid transparent; border-top-color: var(--accent); border-bottom-width: 0; filter: drop-shadow(0 1px 2px #00120c); }
-.compass-label { position: absolute; inset: 0; display: grid; place-items: center; font-size: .82rem; font-weight: 650; color: #f2f6ee; pointer-events: none; }
-
-.vertical-buttons { flex: none; display: grid; gap: .45rem; }
-.vertical-buttons button { height: 2.95rem; width: var(--touch); border: 1px solid var(--line); border-radius: .75rem; background: var(--panel); color: var(--accent); font-size: 1.4rem; touch-action: none; }
-.vertical-buttons button:active { background: #2c463c; }
-
-.fly-toggle {
-  flex: none;
-  display: grid;
-  place-items: center;
-  align-content: center;
-  gap: .1rem;
-  width: 6.4rem;
-  height: 6.4rem;
-  padding: 0;
-  border: 1px solid #eff6da76;
-  border-radius: 1.5rem;
-  background: #16332be0;
-  font-size: .95rem;
-  font-weight: 660;
-  box-shadow: 0 8px 32px #0a201973;
-}
-.fly-toggle:not(:disabled):hover { background: #1f3f35; }
-.fly-glyph { font-size: 1.9rem; line-height: 1; color: var(--accent); transition: transform .25s ease; }
-.fly-toggle[aria-pressed="true"] { background: var(--accent); color: var(--ink); border-color: var(--accent); }
-.fly-toggle[aria-pressed="true"] .fly-glyph { color: var(--ink); transform: rotate(-35deg) translateY(-.1rem); }
-@media (prefers-reduced-motion: reduce) { .fly-glyph { transition: none; } }
+.compass-n { transform: translateY(-2.5rem) rotate(calc(var(--turn, 0rad) * -1)); color: #c4372b !important; }
+.compass-e { transform: translateX(2.5rem) rotate(calc(var(--turn, 0rad) * -1)); }
+.compass-s { transform: translateY(2.5rem) rotate(calc(var(--turn, 0rad) * -1)); }
+.compass-w { transform: translateX(-2.5rem) rotate(calc(var(--turn, 0rad) * -1)); }
+/* A magnetic needle: the red half always seeks north. */
+.compass-needle { position: absolute; left: 50%; top: 50%; width: .95rem; height: 3.5rem; margin: -1.75rem 0 0 -.475rem; background: linear-gradient(to bottom, #d2392c 0 50%, #f4f1e8 50% 100%); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); filter: drop-shadow(0 1px 1px #00000055); }
+.compass-needle i { position: absolute; left: 50%; top: 50%; width: .34rem; height: .34rem; margin: -.17rem; border-radius: 50%; background: #c9b98a; box-shadow: 0 0 0 1px #5a4d2c; }
+.compass-needle::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to right, #0000 0 50%, #00000026 50% 100%); }
+.compass-pointer { position: absolute; left: 50%; top: -.55rem; width: 0; height: 0; margin-left: -.5rem; border: .5rem solid transparent; border-top-color: var(--accent); border-bottom-width: 0; filter: drop-shadow(0 1px 2px #00120c); }
+.compass-label { position: absolute; left: 50%; top: calc(100% + .3rem); transform: translateX(-50%); padding: .1rem .6rem; border-radius: .6rem; background: var(--panel); border: 1px solid var(--line); font-size: .85rem; font-weight: 650; color: #f2f6ee; white-space: nowrap; pointer-events: none; }
 
 .map-credit, .site-version {
   position: absolute;
@@ -230,18 +220,18 @@ h1 { font-size: 1.7rem; font-weight: 660; line-height: 1.18; overflow-wrap: anyw
   .dock { grid-template-columns: 1fr 1fr; row-gap: .6rem; }
   .dock-centre { grid-column: 1 / -1; grid-row: 1; }
   .dock-left { grid-row: 2; }
-  .dock-right { grid-row: 2; flex-wrap: wrap-reverse; }
+  .dock-right { grid-row: 2; }
   .tools button { padding: 0 .7rem; }
   .move-pad { width: 7.4rem; height: 7.4rem; }
-  .compass, .fly-toggle { width: 5rem; height: 5rem; }
-  .compass-n { transform: translateY(-1.5rem) rotate(calc(var(--turn, 0rad) * -1)); }
-  .compass-e { transform: translateX(1.5rem) rotate(calc(var(--turn, 0rad) * -1)); }
-  .compass-s { transform: translateY(1.5rem) rotate(calc(var(--turn, 0rad) * -1)); }
-  .compass-w { transform: translateX(-1.5rem) rotate(calc(var(--turn, 0rad) * -1)); }
-  .compass-dial b { font-size: .8rem; }
-  .compass-label { font-size: .72rem; }
-  .fly-glyph { font-size: 1.4rem; }
-  .fly-toggle { font-size: .8rem; border-radius: 1.1rem; }
+  .lift-lever { height: 7.4rem; width: 3.4rem; }
+  #lift-thumb { width: 2.7rem; height: 2.7rem; }
+  .compass { width: 6.2rem; height: 6.2rem; }
+  .compass-n { transform: translateY(-1.9rem) rotate(calc(var(--turn, 0rad) * -1)); }
+  .compass-e { transform: translateX(1.9rem) rotate(calc(var(--turn, 0rad) * -1)); }
+  .compass-s { transform: translateY(1.9rem) rotate(calc(var(--turn, 0rad) * -1)); }
+  .compass-w { transform: translateX(-1.9rem) rotate(calc(var(--turn, 0rad) * -1)); }
+  .compass-face b { font-size: .85rem; }
+  .compass-needle { height: 2.5rem; margin-top: -1.25rem; width: .8rem; margin-left: -.4rem; }
   .about-panel { bottom: 50%; transform: translate(-50%, 50%); }
   #fullscreen { display: none; }
 }
@@ -254,5 +244,8 @@ h1 { font-size: 1.7rem; font-weight: 660; line-height: 1.18; overflow-wrap: anyw
   .controls-hint, #campus-orientation { display: none; }
   .dock { bottom: max(26px, calc(env(safe-area-inset-bottom) + 22px)); }
   .move-pad { width: 6.6rem; height: 6.6rem; }
+  .lift-lever { height: 6.6rem; }
+  .lift-end small { display: none; }
+  #lift-thumb { width: 2.5rem; height: 2.5rem; font-size: .7rem; }
   .places { max-height: 60vh; }
 }

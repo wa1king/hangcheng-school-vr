@@ -22,7 +22,6 @@ const fullscreen = get<HTMLButtonElement>('fullscreen');
 const vr = get<HTMLButtonElement>('vr');
 const places = get('places');
 const placesToggle = get<HTMLButtonElement>('places-toggle');
-const flyToggle = get<HTMLButtonElement>('fly-toggle');
 const compass = get<HTMLButtonElement>('compass');
 const compassLabel = get('compass-label');
 const reset = get<HTMLButtonElement>('reset');
@@ -63,6 +62,7 @@ let shownYaw = Number.NaN;
 let turnMotion: { start: number; arc: number; durationMs: number; startTime: number } | undefined;
 let pitch = 0;
 let climb = 0;
+let lastLandingProbe = 0;
 let viewZoom = 1;
 let finished = false;
 let firstFramePresented = false;
@@ -130,7 +130,8 @@ const input = createInput({
   surface,
   movePad: get('move-pad'),
   thumb: get('move-thumb'),
-  lifts: get('vertical-buttons'),
+  lever: get('lift-lever'),
+  leverThumb: get('lift-thumb'),
   toggleFlight,
   reset: resetView,
   turn,
@@ -151,24 +152,21 @@ function updateHud() {
   const ready = Boolean(campus && finished);
   const touring = ready && !xrSession;
   app.dataset.mode = mode;
-  flyToggle.disabled = !touring || !player;
-  flyToggle.setAttribute('aria-pressed', String(mode === 'fly'));
-  get('fly-label').textContent = mode === 'fly' ? '落地步行' : '飞行';
   reset.disabled = !touring;
   placesToggle.disabled = !touring;
   if (!touring) togglePlaces(false);
   compass.hidden = !touring;
   get('move-pad').hidden = !touring;
-  get('vertical-buttons').hidden = !touring || mode !== 'fly';
+  get('lift-lever').hidden = !touring || !player;
   controlsHint.hidden = !ready;
   if (!ready) return;
   const desktop: Record<Mode, string> = {
-    walk: '拖动画面转视角 · WASD 或摇杆移动 · 滚轮缩放',
-    fly: '拖动画面转视角 · WASD 或摇杆移动 · E 上升 · Q 下降',
+    walk: '拖动画面转视角 · WASD 或摇杆移动 · 推杆向上或按 E 起飞',
+    fly: '飞行中 · 推杆或 E、Q 升降 · 降到地面自动落地',
   };
   const touch: Record<Mode, string> = {
-    walk: '拖动画面转视角 · 摇杆移动 · 双指缩放',
-    fly: '拖动画面转视角 · 摇杆移动 · 箭头升降',
+    walk: '拖动画面转视角 · 摇杆移动 · 推杆向上起飞',
+    fly: '飞行中 · 推杆升降 · 降到地面自动落地',
   };
   controlsHint.textContent = landingNotice || (input.touch ? touch : desktop)[mode];
 }
@@ -230,14 +228,18 @@ function goTo(at: CampusPoint) {
   }
 }
 
-function setMode(next: Mode, destination?: CampusPoint) {
+function findLanding() {
+  if (!campus || !player) return undefined;
+  return campus.manifest.collisionFromModels
+    ? player.findLanding(flightFeet)
+    : landingQuery?.(point.copy(flightFeet).addScaledVector(camera.up, eyeHeight));
+}
+
+function setMode(next: Mode, destination?: CampusPoint, landing?: THREE.Vector3) {
   if (!finished || !campus || xrSession || !player || (next === mode && !destination)) return;
   clearLandingNotice();
-  let landing: THREE.Vector3 | undefined;
-  if (mode === 'fly' && next === 'walk' && !destination) {
-    landing = campus.manifest.collisionFromModels
-      ? player.findLanding(flightFeet)
-      : landingQuery?.(point.copy(flightFeet).addScaledVector(camera.up, eyeHeight));
+  if (mode === 'fly' && next === 'walk' && !destination && !landing) {
+    landing = findLanding();
     if (!landing && (campus.manifest.collisionFromModels || landingQuery)) {
       landingNotice = '脚下没有足够的落脚空间，换个位置再落地';
       landingNoticeTimer = window.setTimeout(() => {
@@ -248,13 +250,11 @@ function setMode(next: Mode, destination?: CampusPoint) {
       return;
     }
   }
-  input.releaseAll();
+  // A jump to another place drops held controls. Taking off or landing on the
+  // spot keeps them, so the lever and joystick carry straight through.
+  if (destination) input.releaseAll();
   climb = 0;
-  if (next === 'fly') {
-    // Take off from where the visitor stands and rise clear of head height.
-    flightFeet.copy(player.position);
-    climb = takeoffClimb;
-  }
+  if (next === 'fly') flightFeet.copy(player.position);
   mode = next;
   if (next === 'walk') {
     if (destination) resetFeet(destination);
@@ -267,8 +267,11 @@ function setMode(next: Mode, destination?: CampusPoint) {
   updateHud();
 }
 
+/** The F key lifts off with a short rise, or sets down where the visitor hovers. */
 function toggleFlight() {
-  setMode(mode === 'fly' ? 'walk' : 'fly');
+  const flying = mode === 'fly';
+  setMode(flying ? 'walk' : 'fly');
+  if (!flying && mode === 'fly') climb = takeoffClimb;
 }
 
 function togglePlaces(force?: boolean) {
@@ -297,8 +300,9 @@ function readMovement() {
   direction.clampLength(0, 1);
 }
 
-function moveFlat(dt: number) {
+function moveFlat(dt: number, time: number) {
   readMovement();
+  if (mode === 'walk' && player && input.takeoff) setMode('fly');
   if (mode === 'walk' && player) {
     player.update(dt, direction, input.running, input.jumping);
     if (player.grounded) lastSafeFeet.copy(player.position);
@@ -333,7 +337,14 @@ function moveFlat(dt: number) {
   if (!usesModelCollision) {
     flightGoal.y = THREE.MathUtils.clamp(flightGoal.y, campus.bounds.min.y + .02, campus.bounds.max.y + padding * 2);
   }
+  const wanted = flightFeet.y - flightGoal.y;
   flightFeet.copy(player?.constrainFlight(flightFeet, flightGoal) ?? flightGoal);
+  // Descending onto a surface sets the visitor down and returns to walking.
+  if (lift < 0 && wanted > 0 && flightFeet.y - flightGoal.y > wanted * .5 && time - lastLandingProbe > 200) {
+    lastLandingProbe = time;
+    const landing = findLanding();
+    if (landing && flightFeet.y - landing.y < 1.2) setMode('walk', undefined, landing);
+  }
   updateTourView();
 }
 
@@ -405,7 +416,7 @@ function frame(time: number, xrFrame?: XRFrame) {
     if (xrSession) moveXR(dt, xrFrame);
     else {
       advanceTurn(time);
-      moveFlat(dt);
+      moveFlat(dt, time);
       updateCompass();
     }
   }
@@ -535,10 +546,6 @@ async function initialize() {
   }
 }
 
-flyToggle.addEventListener('click', () => {
-  toggleFlight();
-  surface.focus({ preventScroll: true });
-});
 compass.addEventListener('click', () => {
   faceNorth();
   surface.focus({ preventScroll: true });

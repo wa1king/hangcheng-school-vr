@@ -8,7 +8,8 @@ export function createInput(options: {
   surface: HTMLElement;
   movePad: HTMLElement;
   thumb: HTMLElement;
-  lifts: HTMLElement;
+  lever: HTMLElement;
+  leverThumb: HTMLElement;
   toggleFlight: () => void;
   reset: () => void;
   turn: (step: -1 | 1) => void;
@@ -16,7 +17,7 @@ export function createInput(options: {
   zoom: (scale: number) => void;
   onDeviceChange: () => void;
 }) {
-  const { surface, movePad, thumb, lifts } = options;
+  const { surface, movePad, thumb, lever, leverThumb } = options;
   const keys = new Set<string>();
   const touchQuery = matchMedia('(pointer: coarse)');
   let touch = touchQuery.matches;
@@ -27,6 +28,7 @@ export function createInput(options: {
   let stickX = 0;
   let stickY = 0;
   let lift = 0;
+  let leverPointer: number | null = null;
 
   function releaseJoystick() {
     joystick = null;
@@ -35,12 +37,18 @@ export function createInput(options: {
     thumb.style.transform = '';
   }
 
+  function releaseLever() {
+    leverPointer = null;
+    lift = 0;
+    leverThumb.style.transform = '';
+  }
+
   function releaseAll() {
     keys.clear();
     drag = null;
     touches.clear();
     pinchDistance = 0;
-    lift = 0;
+    releaseLever();
     releaseJoystick();
   }
 
@@ -135,22 +143,28 @@ export function createInput(options: {
     if (event.pointerId === joystick) moveJoystick(event);
   });
 
-  for (const button of lifts.querySelectorAll<HTMLButtonElement>('button')) {
-    const direction = Number(button.dataset.lift);
-    let pointer: number | null = null;
-    button.addEventListener('pointerdown', event => {
-      if (pointer !== null) return;
-      pointer = event.pointerId;
-      button.setPointerCapture(event.pointerId);
-      lift = direction;
+  // The lever springs back to the middle. Up climbs, down descends.
+  function moveLever(event: PointerEvent) {
+    const rect = lever.getBoundingClientRect();
+    const travel = rect.height * .32;
+    const offset = Math.max(-1, Math.min(1, (rect.top + rect.height / 2 - event.clientY) / travel));
+    lift = Math.abs(offset) > .12 ? offset : 0;
+    leverThumb.style.transform = `translateY(${-offset * travel}px)`;
+  }
+  lever.addEventListener('pointerdown', event => {
+    if (leverPointer !== null || event.button !== 0) return;
+    event.preventDefault();
+    leverPointer = event.pointerId;
+    moveLever(event);
+    lever.setPointerCapture(event.pointerId);
+  });
+  lever.addEventListener('pointermove', event => {
+    if (event.pointerId === leverPointer) moveLever(event);
+  });
+  for (const end of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) {
+    lever.addEventListener(end, event => {
+      if (event.pointerId === leverPointer) releaseLever();
     });
-    for (const end of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) {
-      button.addEventListener(end, event => {
-        if (event.pointerId !== pointer) return;
-        pointer = null;
-        if (lift === direction) lift = 0;
-      });
-    }
   }
   window.addEventListener('keydown', event => {
     if (event.target instanceof HTMLElement && event.target.closest('input, select, textarea, button, a, [contenteditable]')) return;
@@ -182,6 +196,8 @@ export function createInput(options: {
     get side() { return Number(down('KeyD')) - Number(down('KeyA')) + stickX; },
     get ahead() { return Number(down('KeyW', 'ArrowUp')) - Number(down('KeyS', 'ArrowDown')) + stickY; },
     get lift() { return Number(down('Space', 'KeyE')) - Number(down('ControlLeft', 'ControlRight', 'KeyQ')) + lift; },
+    /** Space jumps on foot, so only the lever and E ask to leave the ground. */
+    get takeoff() { return lift > 0 || down('KeyE'); },
     get running() { return down('ShiftLeft', 'ShiftRight'); },
     get jumping() { return down('Space'); },
     releaseAll,

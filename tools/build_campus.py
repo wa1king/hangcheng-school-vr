@@ -27,6 +27,7 @@ from interiors import PORTAL_Z
 from material_scans import apply_surface_materials
 from mesh import Mesh, rect, rounded
 from sports import add_sports
+from street_life import add_street_life
 from street_surfaces import build_street, ROADSIDE_TREE_X, ROADSIDE_TREE_Z
 from street_traffic import add_traffic
 from surroundings import add_surroundings
@@ -37,6 +38,11 @@ COS, SIN = math.cos(ANGLE), math.sin(ANGLE)
 WGS84_RADIUS = 6378137
 WGS84_E2 = 0.00669437999014
 TEACHING_FLOOR_HEIGHT = 4.02
+# Low planting and broad canopy positions are inferred from the exterior references.
+BEDS = [(-59, 48, 26, 8), (-29, 48, 14, 6), (-68, 57, 23, 4),
+        (37, 70.2, 7.7, 4.8),
+        (10.5, 3.5, 14, 9.1), (56, -2.6, 22, 5.5), (57, 23, 15, 5.2),
+        (-3.5, -52.3, 12, 4.4), (39, -56.8, 28, 3.7), (65, -51, 14, 4.6)]
 
 
 def site_to_world(x, y, z):
@@ -78,13 +84,8 @@ def landscape(visual, polygons, lines):
 
     build_street(visual, campus, lines)
 
-    # Low planting and broad canopy positions are inferred from the exterior references.
-    bed_positions = [(-59, 48, 26, 8), (-29, 48, 14, 6), (-68, 57, 23, 4),
-                     (37, 70.2, 7.7, 4.8),
-                     (10.5, 3.5, 14, 9.1), (56, -2.6, 22, 5.5), (57, 23, 15, 5.2),
-                     (-3.5, -52.3, 12, 4.4), (39, -56.8, 28, 3.7), (65, -51, 14, 4.6)]
     rng = random.Random(18)
-    for i, (x, z, w, d) in enumerate(bed_positions):
+    for i, (x, z, w, d) in enumerate(BEDS):
         visual.prism('curb', rounded(x, z, w, d, min(w, d) * 0.26), -0.02, 0.21, 'planter')
         for u in range(max(1, round(w / 7))):
             position = x + w * ((u + 0.5) / max(1, round(w / 7)) - 0.5)
@@ -202,6 +203,7 @@ def main(target=BASE / 'public' / 'scene'):
     nearby, _ = read_data(BASE / 'evidence' / 'neighborhood-osm.geojson')
     add_surroundings(context, nearby)
     add_traffic(context, lines)
+    add_street_life(context, polygons, lines, BEDS)
     context.export(target / 'surroundings.glb')
     manifest(target, polygons)
     print(f'Campus GLB: {count:,} triangles')
