@@ -1,17 +1,20 @@
 import {
-  BufferGeometry, DoubleSide, Float32BufferAttribute, Mesh, MeshBasicMaterial, Quaternion, Raycaster, SkinnedMesh,
+  BufferGeometry, Color, DoubleSide, Float32BufferAttribute, Mesh, MeshBasicMaterial, MeshStandardMaterial, Quaternion, Raycaster, SkinnedMesh,
   Uint16BufferAttribute, Vector3, type Material, type Object3D,
 } from 'three';
 
 type Arm = [Vector3, Vector3, Vector3];
 type Profile = { arms: [Arm, Arm]; top: SkinnedMesh; collarBase: number };
-type ShirtTemplate = { top: BufferGeometry; collar: BufferGeometry; profile: Profile };
+type ShirtTemplate = { top: BufferGeometry; collar: BufferGeometry; scarf?: BufferGeometry; profile: Profile };
 
 const wardrobe = new WeakMap<BufferGeometry, ShirtTemplate>();
 const coveredSkin = new WeakMap<BufferGeometry, BufferGeometry>();
 let source: Profile | undefined;
 const sides = ['l', 'r'] as const;
 const sampleMaterial = new MeshBasicMaterial({ side: DoubleSide });
+const scarfMaterial = new MeshStandardMaterial({
+  name: 'pupil-red-scarf', roughness: .87, side: DoubleSide, vertexColors: true,
+});
 
 function garment(character: Object3D) {
   let top: SkinnedMesh | undefined;
@@ -182,6 +185,109 @@ function collarGeometry(top: BufferGeometry, profile: Profile) {
   return geometry;
 }
 
+function scarfGeometry(top: BufferGeometry, collar: BufferGeometry, profile: Profile) {
+  const geometry = new BufferGeometry();
+  const mesh = new Mesh(top, sampleMaterial);
+  const collarMesh = new Mesh(collar, sampleMaterial);
+  const ray = new Raycaster();
+  const direction = new Vector3();
+  const position: number[] = [];
+  const colors: number[] = [];
+  const skinIndex: number[] = [];
+  const skinWeight: number[] = [];
+  const chest = profile.top.skeleton.bones.findIndex(bone => bone.name === 'spine_03');
+  const neck = profile.top.skeleton.bones.findIndex(bone => bone.name === 'neck_01');
+  const base = profile.collarBase;
+  const cloth = new Color(0xd5232d);
+  const tint = new Color();
+  const down = new Vector3(0, -1, 0);
+
+  function onShirt(x: number, drop: number, offset: number, shade: number, side = 1) {
+    const y = base - drop;
+    ray.set(new Vector3(x, y, side), direction.set(0, 0, -side));
+    const z = (ray.intersectObject(mesh)[0]?.point.z ?? .049 * side) + offset * side;
+    return { x, y, z, shade };
+  }
+
+  function add({ x, y, z, shade }: ReturnType<typeof onShirt>) {
+    const nearCollar = .12 * Math.max(0, 1 - (base - y) / .085);
+    position.push(x, y, z);
+    tint.copy(cloth).multiplyScalar(shade).toArray(colors, colors.length);
+    skinIndex.push(chest, neck, 0, 0);
+    skinWeight.push(1 - nearCollar, nearCollar, 0, 0);
+  }
+
+  function panel(section: (t: number, u: number) => ReturnType<typeof onShirt>, length: number, folds = 4) {
+    const rows = Array.from({ length: length + 1 }, (_, i) =>
+      Array.from({ length: folds + 1 }, (_, j) => section(i / length, j / folds)));
+    for (let i = 0; i < length; i++) {
+      for (let j = 0; j < folds; j++) {
+        const a = rows[i][j], b = rows[i][j + 1], c = rows[i + 1][j + 1], d = rows[i + 1][j];
+        add(a); add(b); add(c);
+        add(a); add(c); add(d);
+      }
+    }
+  }
+
+  function frontEnd(side: number, t: number, u: number) {
+    const fold = Math.sin(u * Math.PI);
+    const rise = t * t;
+    const point = onShirt(side * (.079 * (1 - t) + .006 * t + (u - .5) * .031),
+      .039 + .095 * t, .0015 + .012 * rise + (.001 + .003 * rise) * fold, .70 + .29 * fold);
+    // Tuck the cloth underneath the actual folded collar where they overlap.
+    const collarSurface = ray.intersectObject(collarMesh)[0]?.point.z;
+    if (collarSurface !== undefined) point.z = Math.min(point.z, collarSurface - .005);
+    return point;
+  }
+
+  function backTriangle(t: number, u: number) {
+    const across = u * 2 - 1;
+    const halfWidth = .102 * (1 - t) ** .85;
+    const fold = Math.cos(across * 3 * Math.PI);
+    return onShirt(across * halfWidth, .024 + .127 * t + .015 * Math.abs(across) * (1 - t),
+      .007 + .0025 * fold, .86 + .11 * fold, -1);
+  }
+
+  for (const side of [-1, 1]) {
+    // The narrow folded ends come out from below the shirt collar.
+    panel((t, u) => frontEnd(side, t, u), 9);
+    panel((t, u) => {
+      const front = frontEnd(side, 0, u);
+      const back = backTriangle(0, .5 + side * (.33 + .17 * u));
+      const shoulder = Math.sin(Math.PI * t);
+      const x = front.x * (1 - t) + back.x * t + side * .027 * shoulder;
+      const z = front.z * (1 - t) + back.z * t;
+      const y = front.y * (1 - t) + back.y * t;
+      ray.set(new Vector3(x, base + .14, z), down);
+      const top = ray.intersectObject(mesh)[0]?.point.y ?? y;
+      return { x, y: y + shoulder * (Math.max(0, top - y) + .009), z,
+        shade: front.shade * (1 - t) + back.shade * t };
+    }, 12);
+    // Overlapping pointed ends hang below the knot, with a crease in each fold.
+    panel((t, u) => {
+      const width = (.026 + .026 * t) * Math.min(1, (1 - t) * 4.4);
+      const fold = Math.sin(u * Math.PI);
+      return onShirt(side * (.007 + (.026 + side * .004) * t) + (u - .5) * width,
+        .143 + (.134 + side * .017) * t, .004 + .009 * fold + (1 - t) * .010, .61 + .42 * fold);
+    }, 11);
+  }
+
+  // A raised knot wraps across the two fabric ends.
+  panel((t, u) => onShirt((u - .5) * (.047 - .009 * t) + .004 * t,
+    .121 + .041 * t + .004 * (u - .5), .012 + .017 * Math.sin(u * Math.PI) * Math.sin((.2 + t * .66) * Math.PI),
+    .64 + .41 * Math.sin(u * Math.PI)), 5);
+
+  // The back triangle fans across the shoulders and rests against the shirt.
+  panel(backTriangle, 10, 20);
+
+  geometry.setAttribute('position', new Float32BufferAttribute(position, 3));
+  geometry.setAttribute('color', new Float32BufferAttribute(colors, 3));
+  geometry.setAttribute('skinIndex', new Uint16BufferAttribute(skinIndex, 4));
+  geometry.setAttribute('skinWeight', new Float32BufferAttribute(skinWeight, 4));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 function hideSkinUnderSleeves(character: Object3D, profile: Profile) {
   character.traverse(node => {
     if (!(node instanceof SkinnedMesh) || Array.isArray(node.material) || node.material.name !== 'Maya | anatomical body.body') return;
@@ -216,10 +322,11 @@ function hideSkinUnderSleeves(character: Object3D, profile: Profile) {
     node.geometry = geometry;
   });
 }
-export function dressInShirt(character: Object3D, woman: boolean, material: Material, collar?: [Material, Material]) {
+export function dressInShirt(character: Object3D, woman: boolean, material: Material, collar?: [Material, Material], scarf = false) {
   if (!source) return;
-  const top = garment(character);
-  if (!top) return;
+  const fittedTop = garment(character);
+  if (!fittedTop) return;
+  const top = fittedTop;
   let template = wardrobe.get(top.geometry);
   if (!template) {
     const profile = measure(character, woman);
@@ -231,11 +338,16 @@ export function dressInShirt(character: Object3D, woman: boolean, material: Mate
   if (woman) hideSkinUnderSleeves(character, template.profile);
   top.geometry = template.top;
   top.material = material;
-  if (collar) {
-    const collarMesh = top.clone(false);
-    collarMesh.name = 'folded-shirt-collar';
-    collarMesh.geometry = template.collar;
-    collarMesh.material = collar;
-    top.parent?.add(collarMesh);
+  function addLayer(name: string, geometry: BufferGeometry, layerMaterial: Material | Material[]) {
+    const layer = top.clone(false);
+    layer.name = name;
+    layer.geometry = geometry;
+    layer.material = layerMaterial;
+    top.parent?.add(layer);
+  }
+  if (collar) addLayer('folded-shirt-collar', template.collar, collar);
+  if (scarf) {
+    template.scarf ??= scarfGeometry(template.top, template.collar, template.profile);
+    addLayer('pupil-red-scarf', template.scarf, scarfMaterial);
   }
 }

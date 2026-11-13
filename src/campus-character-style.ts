@@ -1,10 +1,11 @@
 import {
   BufferGeometry, Color, CylinderGeometry, DoubleSide, Float32BufferAttribute, FrontSide, Group, Mesh, MeshStandardMaterial,
-  type Material, type Object3D, type Side,
+  SRGBColorSpace, TextureLoader, type Material, type Object3D, type Side, type Texture,
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { dressInShirt } from './campus-shirt.ts';
+import crestURL from './hangcheng-school-crest.png';
 
 export { prepareCampusWardrobe } from './campus-shirt.ts';
 
@@ -16,6 +17,7 @@ const streetShirts = [0x8493a1, 0x948575, 0x4d6968, 0xb29b9d, 0xc2b9a6, 0x536b88
 const backpackColors = [0x344c66, 0x715553, 0x415b55, 0x68708a];
 const shirts = new Map<string, MeshStandardMaterial>();
 const collars = new Map<number, [Material, Material]>();
+let schoolCrest: Texture | undefined;
 
 function clothColor(color: number, side: Side = FrontSide) {
   return new MeshStandardMaterial({ color, roughness: .88, side });
@@ -42,11 +44,16 @@ function shirtFor(role: CampusPersonRole, woman: boolean, index: number) {
     teacher: teacherShirts[variant],
     adult: streetShirts[variant],
   }[role];
+  const pupil = role === 'pupil';
+  if (pupil && !schoolCrest) {
+    schoolCrest = new TextureLoader().load(crestURL);
+    schoolCrest.colorSpace = SRGBColorSpace;
+  }
   const accent = new Color(role === 'pupil' ? (woman ? blue : white) : role === 'guard' ? 0xb6a071 : 0xe2ded2);
   const material = clothColor(primary);
   material.onBeforeCompile = shader => {
     shader.uniforms.wardrobeAccent = { value: accent };
-    shader.uniforms.wardrobeEmblem = { value: new Color(0x28785c) };
+    if (pupil) shader.uniforms.wardrobeSchoolCrest = { value: schoolCrest };
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `
         #include <common>
@@ -65,7 +72,7 @@ function shirtFor(role: CampusPersonRole, woman: boolean, index: number) {
         varying vec3 vShirtRest;
         varying vec3 vShirtSleeve;
         uniform vec3 wardrobeAccent;
-        uniform vec3 wardrobeEmblem;
+        ${pupil ? 'uniform sampler2D wardrobeSchoolCrest;' : ''}
       `)
       .replace('#include <color_fragment>', `
         #include <color_fragment>
@@ -78,9 +85,9 @@ function shirtFor(role: CampusPersonRole, woman: boolean, index: number) {
           float tape = outside * sleeve * (1. - smoothstep(.015, .022, abs(vShirtSleeve.y)));
           float cuff = sleeve * smoothstep(.76, .84, vShirtSleeve.z);
           diffuseColor.rgb = mix(diffuseColor.rgb, wardrobeAccent, max(tape, cuff));
-          vec2 mark = (vShirtRest.xy - vec2(.080, ${woman ? '1.295' : '1.389'})) / vec2(.015, .014);
-          float crest = 1. - smoothstep(.87, 1.13, length(mark));
-          diffuseColor.rgb = mix(diffuseColor.rgb, wardrobeEmblem, crest * front * .89);
+          vec2 crestUV = (vShirtRest.xy - vec2(.073, ${woman ? '1.289' : '1.390'})) / .061 + .5;
+          vec4 crest = texture2D(wardrobeSchoolCrest, crestUV);
+          diffuseColor.rgb = mix(diffuseColor.rgb, crest.rgb, crest.a * front);
         ` : role === 'volunteer' ? `
           diffuseColor.rgb = mix(diffuseColor.rgb, wardrobeAccent, sleeve);
           float band = 1. - smoothstep(.008, .013, abs(y - ${woman ? '1.100' : '1.120'}));
@@ -216,7 +223,7 @@ function dressCharacter(character: Object3D, role: CampusPersonRole, index: numb
   const woman = character.children.some(node => node.name.startsWith('Maya'));
   const color = role === 'pupil' ? (woman ? blue : white)
     : role === 'teacher' ? teacherShirts[index % teacherShirts.length] : undefined;
-  dressInShirt(character, woman, shirtFor(role, woman, index), color === undefined ? undefined : collarFor(color));
+  dressInShirt(character, woman, shirtFor(role, woman, index), color === undefined ? undefined : collarFor(color), role === 'pupil');
   character.traverse(node => {
     if (!(node instanceof Mesh)) return;
     node.receiveShadow = true;
