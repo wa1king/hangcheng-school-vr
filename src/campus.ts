@@ -26,6 +26,7 @@ type CampusManifest = {
   evidenceUrl?: string;
   landingBoundary?: PlanCoordinate[];
   tourBoundary?: PlanCoordinate[];
+  streetRoutes?: string;
   spawn: CampusPoint;
   overview?: { target: Coordinate; position: Coordinate };
   locations?: Location[];
@@ -119,6 +120,10 @@ export async function loadCampus() {
   }
   if (manifest.collisionFromModels !== undefined && typeof manifest.collisionFromModels !== 'boolean') {
     throw new Error('校园碰撞来源无效。');
+  }
+  if (manifest.streetRoutes !== undefined && (typeof manifest.streetRoutes !== 'string'
+    || new URL(manifest.streetRoutes, manifestURL).origin !== manifestURL.origin)) {
+    throw new Error('道路路线文件无效。');
   }
   if (manifest.landingBoundary && (!Array.isArray(manifest.landingBoundary) || manifest.landingBoundary.length < 3
     || !manifest.landingBoundary.every(pair => Array.isArray(pair) && pair.length === 2 && pair.every(Number.isFinite)))) {

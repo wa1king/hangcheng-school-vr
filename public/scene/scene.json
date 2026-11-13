@@ -5,13 +5,14 @@
   "northYaw": 0.41887902,
   "models": [
     {
-      "url": "./campus.glb?v=95fe6b9192fc"
+      "url": "./campus.glb?v=b1a409a40e5b"
     },
     {
-      "url": "./surroundings.glb?v=c2b5a4f7aafb",
+      "url": "./surroundings.glb?v=33c1233f1278",
       "surroundings": true
     }
   ],
+  "streetRoutes": "./street-routes.json?v=efb6136af632",
   "collisionFromModels": true,
   "tourBoundary": [
     [

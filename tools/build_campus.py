@@ -30,6 +30,7 @@ from sports import add_sports
 from street_life import add_street_life
 from street_surfaces import build_street, ROADSIDE_TREE_X, ROADSIDE_TREE_Z
 from street_traffic import add_traffic
+from street_routes import build_street_routes
 from surroundings import add_surroundings
 
 
@@ -132,7 +133,7 @@ def garden_bench(mesh, x, z):
         mesh.box('outdoor-wood', x, y, z+.195, 1.83, .091, .046)
 
 
-def manifest(dest, polygons):
+def manifest(dest, polygons, lines):
     def world(x, y, z):
         return [round(value, 3) for value in site_to_world(x, y, z)]
 
@@ -143,6 +144,9 @@ def manifest(dest, polygons):
         with (dest / name).open('rb') as file:
             revision = file_digest(file, 'sha256').hexdigest()[:12]
         return f'./{name}?v={revision}'
+
+    routes = build_street_routes(lines, world)
+    (dest / 'street-routes.json').write_text(json.dumps(routes, separators=(',', ':')) + '\n', encoding='utf-8')
 
     places = [location('gate', '学校正门', STAIR_CENTER, 76.6, pitch=0.22),
               location('park-view', '南望航城文体公园', STAIR_CENTER, 76.6, math.pi, pitch=-.015),
@@ -171,6 +175,7 @@ def manifest(dest, polygons):
         'description': '站在学校正门，向北进校，向南隔着航空路能看到航城文体公园。进校后，从教学楼东侧绕行，往北走，再往西到教学楼后方，可以看到后排教学楼和球场。游览范围为校内，楼内布局为游览示意。',
         'northYaw': round(-ANGLE, 8),
         'models': [{'url': resource('campus.glb')}, {'url': resource('surroundings.glb'), 'surroundings': True}],
+        'streetRoutes': resource('street-routes.json'),
         'collisionFromModels': True,
         'tourBoundary': [[x, z] for x, _, z in (world(a, 0, b) for a, b in list(tour_boundary.exterior.coords)[:-1])],
         'evidenceUrl': './sources.html',
@@ -205,7 +210,7 @@ def main(target=BASE / 'public' / 'scene'):
     add_traffic(context, lines)
     add_street_life(context, polygons, lines, BEDS)
     context.export(target / 'surroundings.glb')
-    manifest(target, polygons)
+    manifest(target, polygons, lines)
     print(f'Campus GLB: {count:,} triangles')
 
 

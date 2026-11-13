@@ -601,6 +601,19 @@ export function createCampusLighting(
 
   return {
     update,
+    addStreetReflections(root: THREE.Object3D) {
+      root.traverse(object => {
+        if (!(object instanceof THREE.Mesh)) return;
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        for (const material of materials) {
+          if (!(material instanceof THREE.MeshStandardMaterial) || updated.has(material)) continue;
+          updated.add(material);
+          material.envMap = photoSkyTexture ?? reflection;
+          material.envMapIntensity = .52;
+          material.needsUpdate = true;
+        }
+      });
+    },
     dispose() {
       disposed = true;
       for (const mesh of [sky, backdrop]) {

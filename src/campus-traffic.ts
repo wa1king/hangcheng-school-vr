@@ -1,7 +1,7 @@
 import { Mesh, MeshStandardMaterial, type Object3D } from 'three';
 
 type Road = 'aviation' | 'xuezi';
-type Lamp = 'red' | 'yellow' | 'green';
+export type Lamp = 'red' | 'yellow' | 'green';
 
 const lensMaterial = /^traffic-lens-(aviation|xuezi)-(red|yellow|green)$/;
 const litColor: Record<Lamp, number> = { red: 0xf94135, yellow: 0xffba2f, green: 0x39d47a };
@@ -14,7 +14,13 @@ const phases: ReadonlyArray<{ untilMs: number; aviation: Lamp; xuezi: Lamp }> = 
   { untilMs: 41000, aviation: 'red', xuezi: 'red' },
 ];
 
-export function createCampusTraffic(root: Object3D): ((timeMs: number) => void) | undefined {
+export function streetTrafficPhase(elapsedMs: number) {
+  const cycleTime = elapsedMs % phases[phases.length - 1].untilMs;
+  const phase = phases.find(({ untilMs }) => cycleTime < untilMs)!;
+  return { phase, canCross: cycleTime < 3000 };
+}
+
+export function createCampusTraffic(root: Object3D): ((phase: ReturnType<typeof streetTrafficPhase>['phase']) => void) | undefined {
   const lenses = new Map<MeshStandardMaterial, { road: Road; lamp: Lamp }>();
   root.traverse((node) => {
     if (!(node instanceof Mesh)) return;
@@ -27,14 +33,9 @@ export function createCampusTraffic(root: Object3D): ((timeMs: number) => void) 
   });
   if (!lenses.size) return undefined;
 
-  let startedAt: number | undefined;
   let lastPhase: (typeof phases)[number] | undefined;
-  const duration = phases[phases.length - 1].untilMs;
-  return (timeMs) => {
-    startedAt ??= timeMs;
-    const elapsed = (timeMs - startedAt) % duration;
-    const phase = phases.find(({ untilMs }) => elapsed < untilMs);
-    if (!phase || phase === lastPhase) return;
+  return (phase) => {
+    if (phase === lastPhase) return;
     lastPhase = phase;
     for (const [material, { road, lamp }] of lenses) {
       material.emissive.setHex(phase[road] === lamp ? litColor[lamp] : 0);

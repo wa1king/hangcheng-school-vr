@@ -1,4 +1,4 @@
-"""Street furniture, vehicles and people that make the school approach read as a lived-in place.
+"""Street furniture and gathering places around the school approach.
 
 Everything here goes into the view-only surroundings model, so visitors walk
 past it without collision. Layout follows one set of rules tied to the road
@@ -109,9 +109,7 @@ def register_materials(mesh):
         ('bench-wood', (150, 112, 76), .7, 0), ('tyre', (30, 31, 32), .85, 0),
         ('bike-yellow', (240, 196, 30), .5, .1), ('bike-blue', (40, 132, 214), .5, .1),
         ('bike-green', (60, 178, 110), .5, .1), ('car-glass', (40, 54, 62), .2, .2),
-        ('car-white', (232, 233, 230), .35, .2), ('car-silver', (160, 166, 170), .35, .4),
-        ('car-black', (38, 40, 44), .35, .3), ('car-blue', (36, 96, 168), .35, .2),
-        ('car-red', (162, 40, 38), .35, .2), ('bus-green', (56, 158, 96), .4, .1),
+        ('cloth-white', (232, 233, 230), .85, 0),
         ('skin', (226, 184, 150), .8, 0), ('skin-tan', (198, 152, 116), .8, 0),
         ('hair', (34, 30, 30), .9, 0), ('uniform-white', (238, 240, 240), .8, 0),
         ('uniform-blue', (38, 82, 160), .8, 0), ('uniform-navy', (30, 46, 92), .8, 0),
@@ -284,35 +282,13 @@ def bicycle(mesh, x, z, heading, base, colour):
     mesh.box(colour, kx, base + .72, kz, .26, .2, .3, heading)
 
 
-def car(mesh, x, z, heading, paint, base=ROAD_LEVEL):
-    extrude(mesh, paint, [(-2.25, .3), (-2.25, .76), (-2.02, .88), (1.5, .92), (2.2, .72), (2.25, .3)], x, z, heading, .9)
-    extrude(mesh, 'car-glass', [(-1.78, .88), (-1.32, 1.42), (.5, 1.45), (1.3, .92)], x, z, heading, .78)
-    roof = [place(x, z, heading, u, w) for u, w in ((-1.32, -.74), (.5, -.74), (.5, .74), (-1.32, .74))]
-    mesh.face(paint, [(px, base + 1.462, pz) for px, pz in roof])
-    for along in (-1.38, 1.4):
-        for side in (-.91, .91):
-            wx, wz = place(x, z, heading, along, side)
-            disc(mesh, 'tyre', wx, base + .33, wz, heading, .33, 10)
-
-
-def bus(mesh, x, z, heading, base=ROAD_LEVEL):
-    mesh.box('car-white', x, base + .34, z, 10.6, 2.86, 2.5, heading)
-    mesh.box('bus-green', x, base + .5, z, 10.64, .62, 2.54, heading)
-    mesh.box('car-glass', x, base + 1.42, z, 10.66, 1.08, 2.56, heading)
-    mesh.box('lamp-head', x, base + 3.2, z, 7.2, .22, 1.9, heading)
-    for along in (-3.4, 3.2):
-        for side in (-1.27, 1.27):
-            wx, wz = place(x, z, heading, along, side)
-            disc(mesh, 'tyre', wx, base + .5, wz, heading, .5, 12)
-
-
 OUTFITS = {
     # top, yoke, sleeve, trousers, cap
     'pupil': ('uniform-white', 'uniform-blue', 'uniform-blue', 'uniform-navy', None),
     'volunteer': ('vest-red', 'vest-red', 'cloth-grey', 'cloth-dark', 'vest-red'),
     'guard': ('guard-navy', 'guard-navy', 'guard-navy', 'guard-navy', 'guard-navy'),
 }
-ADULT_TOPS = ('cloth-grey', 'cloth-khaki', 'cloth-teal', 'cloth-pink', 'car-white', 'cloth-dark')
+ADULT_TOPS = ('cloth-grey', 'cloth-khaki', 'cloth-teal', 'cloth-pink', 'cloth-white', 'cloth-dark')
 BAGS = ('bag-red', 'bag-blue', 'bag-yellow', 'bag-purple')
 
 
@@ -462,14 +438,6 @@ def add_street_life(mesh, polygons, lines, beds):
             bicycle(mesh, *road.at(x, edge + 1.55 + rng.uniform(-.05, .05)),
                     road.heading(x) + math.pi / 2 + lean, WALK, rng.choice(('bike-yellow', 'bike-yellow', 'bike-blue', 'bike-green')))
 
-    # Traffic keeps right: the lanes beside the school run west.
-    paints = ('car-white', 'car-silver', 'car-black', 'car-blue', 'car-red', 'car-white')
-    for x, lane in ((-96, 2.1), (-71, 5.9), (-44, 2.1), (-12, 5.9), (26, 2.1), (78, 5.9),
-                    (-104, -5.9), (-63, -2.1), (-25, -5.9), (8, -2.1), (41, -5.9), (70, -2.1)):
-        heading = road.heading(x) + (math.pi if lane > 0 else 0)
-        car(mesh, *road.at(x, lane), heading, rng.choice(paints))
-    bus(mesh, *road.at(54.5, 6.6), road.heading(54.5) + math.pi)
-
     # Volunteers in red vests stand at the kerb on both sides of the gate.
     for x, toward, turn in ((GATE[0] + 1.0, edge + 1.3, .3), (GATE[0] + 9.6, edge + .95, -.2),
                             (GATE[1] - 9.6, edge + .95, .2), (GATE[1] - 1.0, edge + 1.3, -.3)):
@@ -480,7 +448,7 @@ def add_street_life(mesh, polygons, lines, beds):
         person(mesh, x, z, math.pi / 2, 1.74, 'guard', rng, FORECOURT, walking=False)
 
     # Parents walk pupils in across the forecourt and wait at the bus stop.
-    forecourt = box(GATE[0] + 1, 63, GATE[1] - 1, 88)
+    forecourt = box(GATE[0] + 1, 63, GATE[1] - 1, 83)
     for x, z in scatter(rng, (15.5, 77), 12, 9, forecourt, 1.9):
         heading = -math.pi / 2 + rng.uniform(-.35, .35)
         person(mesh, x, z, heading, rng.uniform(1.56, 1.76), 'adult', rng, FORECOURT, walking=True)
@@ -490,8 +458,4 @@ def add_street_life(mesh, polygons, lines, beds):
         px, pz = road.at(54.5 + along, edge + 1.25)
         person(mesh, px, pz, road.heading(54.5) - math.pi / 2 + rng.uniform(-.5, .5), rng.uniform(1.55, 1.75),
                'adult', rng, WALK, walking=False)
-    for x in (-88, -52, 72):
-        px, pz = road.at(x, edge + 1.5)
-        person(mesh, px, pz, road.heading(x) + rng.choice((0, math.pi)), rng.uniform(1.55, 1.75), 'adult', rng, WALK, walking=True)
-
     campus_people(mesh, polygons, campus, beds, rng)

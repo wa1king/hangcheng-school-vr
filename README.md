@@ -8,6 +8,8 @@
 
 操作控件都排在屏幕底部，尺寸随屏幕放大，供教室电子大屏站立触控使用。
 
+校外行人与车辆在校园首帧后载入。学子路口的信号灯、斑马线和车流使用同一套模拟时序。车道和过街路线由 `tools/street_routes.py` 根据街道模型导出。
+
 从「前往」选择主教学翼、西侧活动楼、北侧教学楼或东南综合楼的入口，可以步行进楼、穿过走廊并沿楼梯到屋顶。楼内平面与主楼连廊是游览示意，教室陈设参考公开课堂照片。
 
 [打开校园漫游](https://wa1king.github.io/hangcheng-school-vr/) · [查看资料来源](https://wa1king.github.io/hangcheng-school-vr/scene/sources.html)
@@ -26,7 +28,7 @@
 
 各类立面的开间、窗台和窗楣高度、分格数记录在 `tools/facade_panels.json`，`tools/facade_kit.py` 据此为普通墙面成套生成壁柱、层间腰线、窗台、遮阳窗楣、勒脚、散水、雨水管、雨水口和空调外机，窗玻璃贴图带窗帘、灯管和课桌。样本里 `basis` 为 `inferred` 的构件是深圳校舍的常见做法，尚未逐面与照片核对，把对应项改为 `null` 即可关闭。
 
-周边楼体的立面贴图在 `tools/facade_photos`，由 `tools/prepare_facade_photos.py` 从 Wikimedia Commons 的 CC0 深圳街拍照片校正裁切生成，来源见该目录的 `SOURCES.md`。`tools/street_life.py` 沿道路轴线和校门位置生成护栏、路灯、公交站、共享单车、车辆和行人，这些都进周边模型，只供观看、没有碰撞。
+周边楼体的立面贴图在 `tools/facade_photos`，由 `tools/prepare_facade_photos.py` 从 Wikimedia Commons 的 CC0 深圳街拍照片校正裁切生成，来源见该目录的 `SOURCES.md`。`tools/street_life.py` 生成护栏、路灯、公交站、共享单车以及校园活动人物。
 
 更新场景模型或主光后，运行 `node tools/bake-campus-light.mjs` 重新生成 `public/scene/campus-baked-light.bin`。它按 `scene.json` 对应的模型版本生成，浏览器在首帧后加载。
 

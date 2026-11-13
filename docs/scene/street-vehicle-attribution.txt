@@ -1,0 +1,40 @@
+Hangcheng School street vehicles
+
+Toyota Corolla (2014)
+Copyright 2026 Dogan Ulus <dogan.ulus@bogazici.edu.tr>
+Copyright 2023 Armored Wave <https://sketchfab.com/armoredwave>
+Original source:
+https://github.com/vevalabs/openx-assets/tree/9c8ed30/src/vehicles/toyota_corolla_2014
+
+Hyundai Tucson (2015)
+Copyright 2025 Dogan Ulus <dogan.ulus@bogazici.edu.tr>
+Copyright 2019 razor24 <https://sketchfab.com/razor24>
+Original source:
+https://github.com/vevalabs/openx-assets/tree/9c8ed30/src/vehicles/hyundai_tucson_2015
+
+Both models are licensed under MPL-2.0 AND CC-BY-4.0:
+./street-vehicle-MPL-2.0.txt
+./street-vehicle-CC-BY-4.0.txt
+https://www.mozilla.org/MPL/2.0/
+https://creativecommons.org/licenses/by/4.0/
+
+Original asset release and attribution:
+https://github.com/vevalabs/openx-assets/releases/tag/20261015
+https://github.com/vevalabs/openx-assets/blob/9c8ed30/src/REUSE.toml
+https://github.com/vevalabs/openx-assets/releases/download/20261015/openx-assets-glb.zip
+
+Changes for this site: unused cabin nodes are detached, the license plate
+geometry is reduced to a plain blue panel, paint/glass/rubber are adjusted,
+brake lights get a separate material, and the meshes are simplified and
+compressed with gltfpack 1.3.0. The geometry is oriented and batched at runtime.
+
+The preferred source files for making these changes are the original GLB
+archive above together with the following source file in this project's
+public source repository:
+https://github.com/wa1king/hangcheng-school-vr/blob/main/tools/prepare_street_vehicles.py
+
+To rebuild, run:
+    python tools/prepare_street_vehicles.py openx-assets-glb.zip <scratch>
+
+Then, for each of corolla and tucson, run:
+    npx --yes gltfpack@1.3.0 -i <scratch>/<model>-prepared.glb -o public/scene/street-vehicle-<model>.glb -cc -vpf -vp 15 -vn 10 -kn -km -si 0.48 -se 0.008 -sv -sp

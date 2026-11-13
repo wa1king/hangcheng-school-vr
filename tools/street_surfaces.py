@@ -26,6 +26,8 @@ def build_street(mesh, campus, lines):
     curb = unary_union([axis.buffer(width + .18, cap_style='flat') for axis, width in road_axes])
     curb = curb.difference(traffic.union(campus))
     footway = LineString(lines[1454566188]).buffer(1.8, cap_style='flat', join_style='mitre')
+    # Join the mapped footway to the east zebra at the Xuezi Road junction.
+    footway = footway.union(box(-133.9, 86.3, -130.22, 91.31))
     forecourt = box(-2.1, 55, 33, 90.4).difference(roadway)
 
     # Keep the entrance and mapped footpath continuous with the school surface.

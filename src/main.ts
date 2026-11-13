@@ -4,7 +4,7 @@ import { createCampusTravelLimit, type CampusTravelLimit } from './campus-bounda
 import { createCampusGroundReflection } from './campus-ground.ts';
 import { createCampusLighting } from './campus-lighting.ts';
 import { createCampusRenderer } from './campus-render.ts';
-import { createCampusTraffic } from './campus-traffic.ts';
+import type { createStreetLife } from './campus-street-life.ts';
 import { createInput, type Mode } from './input.ts';
 import { createLandingQuery } from './landing.ts';
 import { createXrLocomotion } from './xr-locomotion.ts';
@@ -54,7 +54,7 @@ let travelLimit: CampusTravelLimit | undefined;
 let landingQuery: ReturnType<typeof createLandingQuery> | undefined;
 let renderer: THREE.WebGLRenderer;
 let lighting: ReturnType<typeof createCampusLighting> | undefined;
-let traffic: ReturnType<typeof createCampusTraffic>;
+let streetLife: ReturnType<typeof createStreetLife> | undefined;
 let pavement: ReturnType<typeof createCampusGroundReflection> | undefined;
 let campusRenderer: ReturnType<typeof createCampusRenderer>;
 let viewYaw = 0;
@@ -422,7 +422,7 @@ function frame(time: number, xrFrame?: XRFrame) {
   }
   const feet = mode === 'walk' ? player?.position : flightFeet;
   lighting?.update(mode, feet, firstFramePresented, dt);
-  traffic?.(time);
+  streetLife?.(dt);
   pavement?.update(camera, time, finished && mode === 'walk');
   if (finished && !input.touch && !renderer.xr.isPresenting && campusRenderer) {
     campusRenderer.render(scene, camera);
@@ -433,10 +433,12 @@ function frame(time: number, xrFrame?: XRFrame) {
     firstFramePresented = true;
     notice.hidden = true;
     if (campus) {
-      const visuals = campus.visuals;
-      void campus.loadSurroundings().then(context => {
+      const { visuals, manifestURL, manifest } = campus;
+      void campus.loadSurroundings().then(async context => {
         visuals.add(context);
-        traffic = createCampusTraffic(context);
+        const { createStreetLife } = await import('./campus-street-life.ts');
+        streetLife = createStreetLife(context, manifestURL, manifest.streetRoutes,
+          vehicles => lighting?.addStreetReflections(vehicles));
       }).catch(error => console.warn('校园周边场景载入失败', error));
     }
   }
