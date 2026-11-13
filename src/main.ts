@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { loadCampus, type CampusPoint } from './campus.ts';
 import { createCampusTravelLimit, type CampusTravelLimit } from './campus-boundary.ts';
 import { createCampusGroundReflection } from './campus-ground.ts';
@@ -21,12 +20,11 @@ const infoButton = get<HTMLButtonElement>('about');
 const info = get('about-panel');
 const fullscreen = get<HTMLButtonElement>('fullscreen');
 const vr = get<HTMLButtonElement>('vr');
-const locations = get<HTMLSelectElement>('location');
-const modeButtons = [...app.querySelectorAll<HTMLButtonElement>('.mode-controls [data-mode]')];
-const directionControls = get('direction-controls');
-const turnStatus = get('turn-status');
-const directionButtons = [...directionControls.querySelectorAll<HTMLButtonElement>('[data-heading]')];
-const turnButtons = [...directionControls.querySelectorAll<HTMLButtonElement>('[data-turn]')];
+const places = get('places');
+const placesToggle = get<HTMLButtonElement>('places-toggle');
+const flyToggle = get<HTMLButtonElement>('fly-toggle');
+const compass = get<HTMLButtonElement>('compass');
+const compassLabel = get('compass-label');
 const reset = get<HTMLButtonElement>('reset');
 const controlsHint = get('controls-hint');
 const diagnostics = get('diagnostics');
@@ -35,12 +33,12 @@ const debug = query.has('debug');
 const contactOcclusion = !debug || query.get('occlusion') !== '0';
 const cameraResponse = !debug || query.get('camera') !== '0';
 const groundReflections = !debug || query.get('reflection') !== '0';
-const directions = [
-  { id: 'north', label: '北', yaw: 0 },
-  { id: 'east', label: '东', yaw: -Math.PI / 2 },
-  { id: 'south', label: '南', yaw: Math.PI },
-  { id: 'west', label: '西', yaw: Math.PI / 2 },
-] as const;
+// View yaw is measured from north and grows to the left, so bearings run the other way.
+const bearings = ['北', '东北', '东', '东南', '南', '西南', '西', '西北'];
+const quarterTurn = Math.PI / 2;
+const lookLimit = 1.25;
+const lookRate = .0045; // Radians per CSS pixel, so a hand-width drag turns about a quarter.
+const takeoffClimb = 7;
 const forward = new THREE.Vector3();
 const right = new THREE.Vector3();
 const direction = new THREE.Vector3();
@@ -49,10 +47,8 @@ const flightFeet = new THREE.Vector3();
 const flightGoal = new THREE.Vector3();
 const xrLocomotion = createXrLocomotion();
 const point = new THREE.Vector3();
-const orbitOffset = new THREE.Vector3();
-const overviewAnchor = new THREE.Vector3();
 
-let mode: Mode = 'overview';
+let mode: Mode = 'walk';
 let campus: Awaited<ReturnType<typeof loadCampus>> | undefined;
 let player: PlayerController | undefined;
 let travelLimit: CampusTravelLimit | undefined;
@@ -62,11 +58,11 @@ let lighting: ReturnType<typeof createCampusLighting> | undefined;
 let traffic: ReturnType<typeof createCampusTraffic>;
 let pavement: ReturnType<typeof createCampusGroundReflection> | undefined;
 let campusRenderer: ReturnType<typeof createCampusRenderer>;
-let heading = 0;
 let viewYaw = 0;
+let shownYaw = Number.NaN;
 let turnMotion: { start: number; arc: number; durationMs: number; startTime: number } | undefined;
 let pitch = 0;
-let savedWalkPitch = 0;
+let climb = 0;
 let viewZoom = 1;
 let finished = false;
 let firstFramePresented = false;
@@ -83,48 +79,36 @@ rig.add(camera);
 scene.add(rig);
 const updateCamera = createTourCamera(camera);
 
-const orbit = new OrbitControls(camera, surface);
-orbit.enabled = false;
-orbit.enableDamping = true;
-orbit.dampingFactor = .095;
-orbit.maxPolarAngle = Math.PI / 2 - .035;
-orbit.minDistance = 5;
-orbit.zoomSpeed = .95;
-orbit.enableRotate = false;
-orbit.enablePan = true;
-orbit.screenSpacePanning = false;
-
-function setHeading(next: number) {
-  if (!finished || xrSession || next === heading) return;
-  const target = directions[next].yaw;
-  const arc = THREE.MathUtils.euclideanModulo(target - viewYaw + Math.PI, Math.PI * 2) - Math.PI;
-  heading = next;
-  if (Math.abs(arc) < .001) {
-    settleHeading();
-  } else {
-    turnMotion = { start: viewYaw, arc, durationMs: Math.max(320, 1180 * Math.abs(arc) / (Math.PI / 2)), startTime: performance.now() };
-  }
-  updateDirectionHud();
-}
-
-function settleHeading() {
-  viewYaw = directions[heading].yaw;
-  turnMotion = undefined;
+function startTurn(target: number) {
+  if (!finished || xrSession) return;
+  const arc = target - viewYaw;
+  turnMotion = Math.abs(arc) < .001 ? undefined
+    : { start: viewYaw, arc, durationMs: Math.max(320, 1180 * Math.abs(arc) / quarterTurn), startTime: performance.now() };
 }
 
 function advanceTurn(time: number) {
-  if (!turnMotion) return false;
+  if (!turnMotion) return;
   const progress = THREE.MathUtils.clamp((time - turnMotion.startTime) / turnMotion.durationMs, 0, 1);
   viewYaw = turnMotion.start + turnMotion.arc * (progress * progress * (3 - 2 * progress));
-  if (progress === 1) {
-    settleHeading();
-    updateDirectionHud();
-  }
-  return true;
+  if (progress === 1) turnMotion = undefined;
 }
 
+/** Turn to the next compass point, wherever the view was dragged to. */
 function turn(step: -1 | 1) {
-  setHeading(THREE.MathUtils.euclideanModulo(heading + step, directions.length));
+  const quarters = -(turnMotion ? turnMotion.start + turnMotion.arc : viewYaw) / quarterTurn;
+  startTurn(-(step > 0 ? Math.floor(quarters + 1.001) : Math.ceil(quarters - 1.001)) * quarterTurn);
+}
+
+function faceNorth() {
+  startTurn(viewYaw - (THREE.MathUtils.euclideanModulo(viewYaw + Math.PI, Math.PI * 2) - Math.PI));
+}
+
+function look(dx: number, dy: number) {
+  if (!finished || xrSession) return;
+  turnMotion = undefined;
+  const rate = lookRate / camera.zoom;
+  viewYaw -= dx * rate;
+  pitch = THREE.MathUtils.clamp(pitch - dy * rate, -lookLimit, lookLimit);
 }
 
 function directionYaw() {
@@ -132,12 +116,12 @@ function directionYaw() {
 }
 
 function setCameraZoom() {
-  camera.zoom = mode === 'overview' ? 1 : viewZoom;
+  camera.zoom = viewZoom;
   camera.updateProjectionMatrix();
 }
 
 function zoom(scale: number) {
-  if (!finished || mode === 'overview' || xrSession || !Number.isFinite(scale) || scale <= 0) return;
+  if (!finished || xrSession || !Number.isFinite(scale) || scale <= 0) return;
   viewZoom = THREE.MathUtils.clamp(viewZoom * scale, .78, 2.5);
   setCameraZoom();
 }
@@ -147,60 +131,46 @@ const input = createInput({
   movePad: get('move-pad'),
   thumb: get('move-thumb'),
   lifts: get('vertical-buttons'),
-  mode: () => mode,
-  setMode,
+  toggleFlight,
   reset: resetView,
   turn,
+  look,
   zoom,
   onDeviceChange: updateHud,
 });
 
-function updateDirectionHud() {
-  const destination = directions[heading];
-  directionControls.dataset.turning = String(Boolean(turnMotion));
-  turnStatus.textContent = turnMotion ? `正在转向${destination.label}` : '';
-  for (const button of directionButtons) {
-    button.setAttribute('aria-pressed', String(button.dataset.heading === destination.id));
-  }
+function updateCompass() {
+  if (viewYaw === shownYaw) return;
+  shownYaw = viewYaw;
+  compass.style.setProperty('--turn', `${viewYaw.toFixed(4)}rad`);
+  const facing = `朝${bearings[THREE.MathUtils.euclideanModulo(Math.round(-viewYaw / (quarterTurn / 2)), bearings.length)]}`;
+  if (compassLabel.textContent !== facing) compassLabel.textContent = facing;
 }
 
 function updateHud() {
   const ready = Boolean(campus && finished);
+  const touring = ready && !xrSession;
   app.dataset.mode = mode;
-  for (const button of modeButtons) {
-    const buttonMode = button.dataset.mode;
-    button.disabled = !ready || (buttonMode === 'walk' && !player);
-    button.setAttribute('aria-pressed', String(mode === buttonMode));
-  }
-  reset.disabled = !ready;
-  directionControls.hidden = !ready || Boolean(xrSession);
-  updateDirectionHud();
-  get('reticle').hidden = !ready || mode === 'overview' || input.touch;
-  get('move-pad').hidden = !ready || Boolean(xrSession);
-  get('vertical-buttons').hidden = !ready || mode !== 'fly' || !input.touch;
+  flyToggle.disabled = !touring || !player;
+  flyToggle.setAttribute('aria-pressed', String(mode === 'fly'));
+  get('fly-label').textContent = mode === 'fly' ? '落地步行' : '飞行';
+  reset.disabled = !touring;
+  placesToggle.disabled = !touring;
+  if (!touring) togglePlaces(false);
+  compass.hidden = !touring;
+  get('move-pad').hidden = !touring;
+  get('vertical-buttons').hidden = !touring || mode !== 'fly';
   controlsHint.hidden = !ready;
   if (!ready) return;
   const desktop: Record<Mode, string> = {
-    overview: '摇杆平移 · 滚轮缩放 · 点击方位转向',
-    walk: '摇杆或 WASD 移动 · 滚轮缩放 · 点击方位转向',
-    fly: '摇杆或 WASD 移动 · E 上升 · Q 下降',
+    walk: '拖动画面转视角 · WASD 或摇杆移动 · 滚轮缩放',
+    fly: '拖动画面转视角 · WASD 或摇杆移动 · E 上升 · Q 下降',
   };
   const touch: Record<Mode, string> = {
-    overview: '摇杆平移 · 双指缩放 · 点击方位转向',
-    walk: '摇杆移动 · 双指缩放 · 点击方位转向',
-    fly: '摇杆移动 · 右侧按钮升降 · 双指缩放',
+    walk: '拖动画面转视角 · 摇杆移动 · 双指缩放',
+    fly: '拖动画面转视角 · 摇杆移动 · 箭头升降',
   };
   controlsHint.textContent = landingNotice || (input.touch ? touch : desktop)[mode];
-}
-
-const overviewScale = (aspect: number) => Math.max(1, 1.05 / aspect);
-
-function orientOverview(dt?: number) {
-  const yaw = directionYaw();
-  const distance = Math.hypot(camera.position.x - orbit.target.x, camera.position.z - orbit.target.z);
-  camera.position.x = orbit.target.x + Math.sin(yaw) * distance;
-  camera.position.z = orbit.target.z + Math.cos(yaw) * distance;
-  updateOverview(dt);
 }
 
 function constrainTravel(from: THREE.Vector3, to: THREE.Vector3) {
@@ -209,46 +179,15 @@ function constrainTravel(from: THREE.Vector3, to: THREE.Vector3) {
   to.z = from.z + (to.z - from.z) * fraction;
 }
 
-function updateOverview(dt?: number) {
-  orbit.update(dt);
-  if (!travelLimit) return;
-  point.copy(orbit.target);
-  constrainTravel(overviewAnchor, orbit.target);
-  camera.position.add(point.subVectors(orbit.target, point));
-  constrainTravel(orbit.target, camera.position);
-  camera.lookAt(orbit.target);
-}
-
-function showOverview() {
-  if (!campus) return;
-  const config = campus.manifest.overview;
-  const span = Math.max(campus.size.x, campus.size.z, campus.size.y, 12);
-  if (config) {
-    orbit.target.fromArray(config.target);
-    camera.position.fromArray(config.position);
-  } else {
-    orbit.target.copy(campus.center);
-    camera.position.copy(campus.center).add(point.set(span * .55, span * .65, span * .68));
-  }
-  overviewAnchor.copy(orbit.target);
-  camera.position.copy(orbitOffset.subVectors(camera.position, orbit.target).multiplyScalar(overviewScale(camera.aspect)).add(orbit.target));
-  orbit.minDistance = Math.max(3, span * .025);
-  orbit.maxDistance = travelLimit
-    ? camera.position.distanceTo(orbit.target) * 1.6
-    : Math.max(span * 3, camera.position.distanceTo(orbit.target) * 1.6);
-  orientOverview();
-}
-
 function updateTourView() {
   const feet = mode === 'walk' ? player?.position : flightFeet;
-  if (feet && mode !== 'overview' && !xrSession) updateCamera(feet, directionYaw(), pitch);
+  if (feet && !xrSession) updateCamera(feet, directionYaw(), pitch);
 }
 
 function faceLocation(at: CampusPoint, defaultPitch = 0) {
   const north = campus?.manifest.northYaw ?? 0;
-  const offset = (at.yaw ?? north) - north;
-  heading = THREE.MathUtils.euclideanModulo(Math.round(-offset / (Math.PI / 2)), directions.length);
-  settleHeading();
+  viewYaw = (at.yaw ?? north) - north;
+  turnMotion = undefined;
   pitch = at.pitch ?? defaultPitch;
 }
 
@@ -257,7 +196,13 @@ function resetFeet(at: CampusPoint) {
   player?.teleport(point);
   lastSafeFeet.copy(point);
   faceLocation(at);
-  savedWalkPitch = pitch;
+}
+
+/** Without walkable collision the tour stays in the air above a place. */
+function hoverAbove(at: CampusPoint, height: number, defaultPitch: number) {
+  flightFeet.fromArray(at.position);
+  flightFeet.y += height;
+  faceLocation(at, defaultPitch);
 }
 
 function clearLandingNotice() {
@@ -267,37 +212,34 @@ function clearLandingNotice() {
 
 function resetView() {
   if (!campus || xrSession) return;
-  clearLandingNotice();
-  input.releaseAll();
   viewZoom = 1;
   setCameraZoom();
-  if (mode === 'overview') {
-    faceLocation(campus.manifest.spawn);
-    showOverview();
+  goTo(campus.manifest.spawn);
+}
+
+function goTo(at: CampusPoint) {
+  if (!campus || xrSession) return;
+  if (player) {
+    setMode('walk', at);
+  } else {
+    clearLandingNotice();
+    input.releaseAll();
+    hoverAbove(at, at === campus.manifest.spawn ? Math.max(10, campus.size.y * .6) : 2, -.2);
+    updateTourView();
     updateHud();
-    return;
   }
-  resetFeet(campus.manifest.spawn);
-  if (mode === 'fly') {
-    flightFeet.fromArray(campus.manifest.spawn.position);
-    flightFeet.y += Math.max(10, campus.size.y * .6);
-    pitch = -.20;
-  }
-  updateTourView();
-  updateHud();
 }
 
 function setMode(next: Mode, destination?: CampusPoint) {
-  if (!finished || !campus || xrSession || (next === 'walk' && !player) || (next === mode && !destination)) return;
-  const previous = mode;
+  if (!finished || !campus || xrSession || !player || (next === mode && !destination)) return;
   clearLandingNotice();
   let landing: THREE.Vector3 | undefined;
-  if (previous === 'fly' && next === 'walk' && !destination && player) {
+  if (mode === 'fly' && next === 'walk' && !destination) {
     landing = campus.manifest.collisionFromModels
       ? player.findLanding(flightFeet)
       : landingQuery?.(point.copy(flightFeet).addScaledVector(camera.up, eyeHeight));
     if (!landing && (campus.manifest.collisionFromModels || landingQuery)) {
-      landingNotice = '脚下没有足够的落脚空间';
+      landingNotice = '脚下没有足够的落脚空间，换个位置再落地';
       landingNoticeTimer = window.setTimeout(() => {
         landingNotice = '';
         updateHud();
@@ -306,70 +248,42 @@ function setMode(next: Mode, destination?: CampusPoint) {
       return;
     }
   }
-  if (mode === 'walk') {
-    savedWalkPitch = pitch;
-  }
   input.releaseAll();
+  climb = 0;
   if (next === 'fly') {
-    if (previous === 'walk' && player) {
-      flightFeet.copy(player.position);
-    } else {
-      flightFeet.fromArray(campus.manifest.spawn.position);
-      flightFeet.y += Math.max(10, campus.size.y * .6);
-    }
-    pitch = -.22;
+    // Take off from where the visitor stands and rise clear of head height.
+    flightFeet.copy(player.position);
+    climb = takeoffClimb;
   }
   mode = next;
-  orbit.enabled = next === 'overview';
-  setCameraZoom();
-  if (next === 'overview') showOverview();
-  if (next === 'walk' && player) {
+  if (next === 'walk') {
     if (destination) resetFeet(destination);
-    else if (landing) {
-      player.teleport(landing);
-      lastSafeFeet.copy(landing);
-      pitch = savedWalkPitch;
-    } else {
-      player.teleport(lastSafeFeet);
-      pitch = savedWalkPitch;
+    else {
+      player.teleport(landing ?? lastSafeFeet);
+      if (landing) lastSafeFeet.copy(landing);
     }
   }
   updateTourView();
   updateHud();
 }
 
-function moveToLocation() {
-  const choice = campus?.manifest.locations?.find(item => item.id === locations.value);
-  if (!choice || xrSession) return;
-  if (player) {
-    setMode('walk', choice);
-  } else {
-    setMode('fly');
-    flightFeet.fromArray(choice.position);
-    flightFeet.y += 2;
-    faceLocation(choice, -.12);
-    updateTourView();
-    updateDirectionHud();
-  }
-  locations.value = '';
-  surface.focus({ preventScroll: true });
+function toggleFlight() {
+  setMode(mode === 'fly' ? 'walk' : 'fly');
+}
+
+function togglePlaces(force?: boolean) {
+  const show = force ?? places.hidden;
+  if (show) toggleInfo(false);
+  places.hidden = !show;
+  placesToggle.setAttribute('aria-expanded', String(show));
 }
 
 function resize() {
   const width = surface.clientWidth;
   const height = surface.clientHeight;
   if (!width || !height) return;
-  const previousScale = overviewScale(camera.aspect);
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
-  if (campus && mode === 'overview') {
-    const scale = overviewScale(camera.aspect) / previousScale;
-    camera.position.copy(orbitOffset.subVectors(camera.position, orbit.target).multiplyScalar(scale).add(orbit.target));
-    orbit.maxDistance = travelLimit
-      ? orbit.maxDistance * scale
-      : Math.max(orbit.maxDistance, camera.position.distanceTo(orbit.target) * 1.6);
-    updateOverview();
-  }
   if (!renderer || xrSession) return;
   renderer.setPixelRatio(Math.min(devicePixelRatio, input.touch ? 1.5 : 2));
   renderer.setSize(width, height, false);
@@ -383,15 +297,6 @@ function readMovement() {
   direction.clampLength(0, 1);
 }
 
-function moveOverview(dt: number, turning: boolean) {
-  readMovement();
-  const distance = Math.min(80, Math.max(6, (camera.position.y - orbit.target.y) * .28)) * dt;
-  camera.position.addScaledVector(direction, distance);
-  orbit.target.addScaledVector(direction, distance);
-  if (turning) orientOverview(dt);
-  else updateOverview(dt);
-}
-
 function moveFlat(dt: number) {
   readMovement();
   if (mode === 'walk' && player) {
@@ -402,8 +307,15 @@ function moveFlat(dt: number) {
     return;
   }
   if (!campus) return;
-  const speed = input.running ? 22 : 9;
-  const lift = THREE.MathUtils.clamp(input.lift, -1, 1);
+  const speed = input.running ? 32 : 16;
+  let lift = THREE.MathUtils.clamp(input.lift, -1, 1);
+  if (lift) climb = 0;
+  else if (climb > 0) {
+    // The take-off rise eases out and yields as soon as the visitor steers the height.
+    const rise = Math.min(climb, Math.max(.6, climb * 2.4) * dt);
+    climb -= rise;
+    lift = rise / (speed * dt || 1);
+  }
   const usesModelCollision = campus.manifest.collisionFromModels && player;
   const padding = usesModelCollision ? 0 : Math.max(25, Math.max(campus.size.x, campus.size.z) * .4);
   flightGoal.copy(flightFeet).addScaledVector(direction, dt * speed);
@@ -460,7 +372,7 @@ async function enterVR() {
   try {
     const session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures: ['local-floor'] });
     setMode('walk');
-    settleHeading();
+    turnMotion = undefined;
     xrSession = session;
     input.releaseAll();
     updateHud();
@@ -492,16 +404,16 @@ function frame(time: number, xrFrame?: XRFrame) {
   if (finished) {
     if (xrSession) moveXR(dt, xrFrame);
     else {
-      const turning = advanceTurn(time);
-      if (mode === 'overview') moveOverview(dt, turning);
-      else moveFlat(dt);
+      advanceTurn(time);
+      moveFlat(dt);
+      updateCompass();
     }
   }
-  const feet = mode === 'walk' ? player?.position : mode === 'fly' ? flightFeet : undefined;
+  const feet = mode === 'walk' ? player?.position : flightFeet;
   lighting?.update(mode, feet, firstFramePresented, dt);
   traffic?.(time);
   pavement?.update(camera, time, finished && mode === 'walk');
-  if (finished && mode !== 'overview' && !input.touch && !renderer.xr.isPresenting && campusRenderer) {
+  if (finished && !input.touch && !renderer.xr.isPresenting && campusRenderer) {
     campusRenderer.render(scene, camera);
   } else {
     renderer.render(scene, camera);
@@ -520,14 +432,14 @@ function frame(time: number, xrFrame?: XRFrame) {
   if (debug) {
     const coords = camera.position.toArray().map(value => value.toFixed(2)).join(', ');
     const { calls, triangles } = renderer.info.render;
-    const feetCoords = (mode === 'overview' ? player?.position : feet)?.toArray().map(value => value.toFixed(2)).join(', ') ?? '—';
-    const facing = directions[heading];
-    diagnostics.textContent = `${mode}${mode === 'walk' && player?.grounded ? ' grounded' : ''}\n${coords}\n${calls} draws · ${triangles.toLocaleString()} tris\nheading ${directionYaw().toFixed(3)}\nfeet ${feetCoords}\nfacing ${facing.label}\nzoom ${camera.zoom.toFixed(3)}\nmirror ${pavement?.active ? 'on' : 'off'} · ${pavement?.passes ?? 0} captures`;
+    const feetCoords = feet?.toArray().map(value => value.toFixed(2)).join(', ') ?? '—';
+    diagnostics.textContent = `${mode}${mode === 'walk' && player?.grounded ? ' grounded' : ''}\n${coords}\n${calls} draws · ${triangles.toLocaleString()} tris\nheading ${directionYaw().toFixed(3)}\nfeet ${feetCoords}\nfacing ${compassLabel.textContent}\nzoom ${camera.zoom.toFixed(3)}\nmirror ${pavement?.active ? 'on' : 'off'} · ${pavement?.passes ?? 0} captures`;
   }
 }
 
 function toggleInfo(force?: boolean) {
   const show = force ?? info.hidden;
+  if (show) togglePlaces(false);
   info.hidden = !show;
   infoButton.setAttribute('aria-expanded', String(show));
 }
@@ -536,7 +448,7 @@ function configureInfo(manifest: NonNullable<typeof campus>['manifest'], manifes
   get('campus-title').textContent = manifest.title;
   document.title = `${manifest.title} · 3D 校园`;
   get('campus-status').textContent = manifest.status ?? '3D 校园';
-  get('description').textContent = manifest.description ?? manifest.status ?? '可从总览、飞行和步行视角查看校园场景。';
+  get('description').textContent = manifest.description ?? manifest.status ?? '可以步行或飞行查看校园场景。';
   if (manifest.evidenceUrl) {
     const url = new URL(manifest.evidenceUrl, manifestURL);
     if (url.protocol === 'https:' || url.protocol === 'http:') {
@@ -545,8 +457,18 @@ function configureInfo(manifest: NonNullable<typeof campus>['manifest'], manifes
       evidence.hidden = false;
     }
   }
-  for (const location of manifest.locations ?? []) locations.add(new Option(location.label, location.id));
-  get('location-wrap').hidden = locations.options.length < 2;
+  for (const location of manifest.locations ?? []) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = location.label;
+    button.addEventListener('click', () => {
+      togglePlaces(false);
+      goTo(location);
+      surface.focus({ preventScroll: true });
+    });
+    places.append(button);
+  }
+  placesToggle.hidden = !places.childElementCount;
 }
 
 async function initialize() {
@@ -598,14 +520,10 @@ async function initialize() {
         get('description').append(' 本次载入未启用步行。');
       }
     }
-    if (!player && campus.collision.children.length === 0) get('description').append(' 当前场景支持总览与飞行。');
-    resetFeet(campus.manifest.spawn);
+    if (!player && campus.collision.children.length === 0) get('description').append(' 当前场景支持飞行。');
+    if (!player) mode = 'fly';
     finished = true;
-    if (player) setMode('walk');
-    else {
-      showOverview();
-      updateHud();
-    }
+    goTo(campus.manifest.spawn);
     renderer.setAnimationLoop(frame);
     void initializeVR();
   } catch (error) {
@@ -617,34 +535,33 @@ async function initialize() {
   }
 }
 
-for (const button of modeButtons) {
-  button.addEventListener('click', () => {
-    setMode(button.dataset.mode as Mode);
-    surface.focus({ preventScroll: true });
-  });
-}
-for (const button of directionButtons) {
-  button.addEventListener('click', () => {
-    const next = directions.findIndex(direction => direction.id === button.dataset.heading);
-    if (next !== -1) setHeading(next);
-    surface.focus({ preventScroll: true });
-  });
-}
-for (const button of turnButtons) {
-  button.addEventListener('click', () => {
-    turn(button.dataset.turn === 'left' ? -1 : 1);
-    surface.focus({ preventScroll: true });
-  });
-}
+flyToggle.addEventListener('click', () => {
+  toggleFlight();
+  surface.focus({ preventScroll: true });
+});
+compass.addEventListener('click', () => {
+  faceNorth();
+  surface.focus({ preventScroll: true });
+});
 reset.addEventListener('click', () => {
   resetView();
   surface.focus({ preventScroll: true });
 });
+placesToggle.addEventListener('click', () => togglePlaces());
 infoButton.addEventListener('click', () => toggleInfo());
+// Touching the scene puts away whichever panel is open.
+surface.addEventListener('pointerdown', () => {
+  togglePlaces(false);
+  toggleInfo(false);
+});
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && !info.hidden) {
+  if (event.key !== 'Escape') return;
+  if (!info.hidden) {
     toggleInfo(false);
     infoButton.focus();
+  } else if (!places.hidden) {
+    togglePlaces(false);
+    placesToggle.focus();
   }
 });
 fullscreen.addEventListener('click', async () => {
@@ -659,7 +576,6 @@ document.addEventListener('fullscreenchange', () => {
   fullscreen.lastChild!.textContent = document.fullscreenElement ? '退出全屏' : '全屏';
 });
 vr.addEventListener('click', () => void enterVR());
-locations.addEventListener('change', moveToLocation);
 get('retry').addEventListener('click', () => window.location.reload());
 window.addEventListener('pagehide', event => {
   if (event.persisted) return;
@@ -667,7 +583,6 @@ window.addEventListener('pagehide', event => {
   lighting?.dispose();
   pavement?.dispose();
   campusRenderer?.dispose();
-  orbit.dispose();
   if (!renderer) return;
   renderer.setAnimationLoop(null);
   renderer.dispose();

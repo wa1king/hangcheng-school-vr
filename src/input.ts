@@ -1,4 +1,4 @@
-export type Mode = 'overview' | 'walk' | 'fly';
+export type Mode = 'walk' | 'fly';
 
 const movementKeys = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ShiftLeft', 'ShiftRight', 'Space', 'KeyE', 'KeyQ', 'ControlLeft', 'ControlRight']);
 
@@ -9,10 +9,10 @@ export function createInput(options: {
   movePad: HTMLElement;
   thumb: HTMLElement;
   lifts: HTMLElement;
-  mode: () => Mode;
-  setMode: (mode: Mode) => void;
+  toggleFlight: () => void;
   reset: () => void;
   turn: (step: -1 | 1) => void;
+  look: (dx: number, dy: number) => void;
   zoom: (scale: number) => void;
   onDeviceChange: () => void;
 }) {
@@ -73,12 +73,12 @@ export function createInput(options: {
     if (event.pointerType === 'touch') setTouch(true);
     else if (event.pointerType === 'mouse' && !touchQuery.matches) setTouch(false);
   });
+  // One finger or the mouse drags the view. A second finger turns the drag into a pinch.
   surface.addEventListener('pointerdown', event => {
     if (event.button !== 0) return;
     const position = { x: event.clientX, y: event.clientY };
     if (event.pointerType === 'touch') {
-      if (touches.size === 0) drag = { id: event.pointerId, ...position };
-      else drag = null;
+      drag = touches.size === 0 ? { id: event.pointerId, ...position } : null;
       touches.set(event.pointerId, position);
       pinchDistance = distanceBetweenTouches();
     } else {
@@ -89,24 +89,27 @@ export function createInput(options: {
   });
   surface.addEventListener('pointermove', event => {
     const position = touches.get(event.pointerId);
-    if (!position) return;
-    position.x = event.clientX;
-    position.y = event.clientY;
-    const nextDistance = distanceBetweenTouches();
-    if (nextDistance && pinchDistance && options.mode() !== 'overview') {
-      options.zoom(nextDistance / pinchDistance);
+    if (position) {
+      position.x = event.clientX;
+      position.y = event.clientY;
+      const nextDistance = distanceBetweenTouches();
+      if (nextDistance && pinchDistance) options.zoom(nextDistance / pinchDistance);
+      pinchDistance = nextDistance;
     }
-    pinchDistance = nextDistance;
+    if (event.pointerId !== drag?.id) return;
+    options.look(event.clientX - drag.x, event.clientY - drag.y);
+    drag.x = event.clientX;
+    drag.y = event.clientY;
   });
   for (const end of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) {
     surface.addEventListener(end, event => {
-      if (touches.delete(event.pointerId)) pinchDistance = distanceBetweenTouches();
-      if (event.pointerId !== drag?.id) return;
-      const dx = event.clientX - drag.x;
-      const dy = event.clientY - drag.y;
-      drag = null;
-      if (end === 'pointerup' && Math.abs(dx) >= 36 && Math.abs(dx) > Math.abs(dy) * 1.2) {
-        options.turn(dx < 0 ? -1 : 1);
+      if (touches.delete(event.pointerId)) {
+        pinchDistance = distanceBetweenTouches();
+        // The finger left on the glass after a pinch carries on dragging the view.
+        const [remaining] = touches.entries();
+        drag = touches.size === 1 ? { id: remaining[0], ...remaining[1] } : null;
+      } else if (event.pointerId === drag?.id) {
+        drag = null;
       }
     });
     movePad.addEventListener(end, event => {
@@ -114,7 +117,7 @@ export function createInput(options: {
     });
   }
   surface.addEventListener('wheel', event => {
-    if (options.mode() === 'overview' || !event.deltaY) return;
+    if (!event.deltaY) return;
     event.preventDefault();
     const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16
       : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? surface.clientHeight : 1;
@@ -159,14 +162,12 @@ export function createInput(options: {
       if (!event.repeat) options.turn(event.code === 'ArrowLeft' ? -1 : 1);
       return;
     }
-    if (movementKeys.has(event.code) && options.mode() !== 'overview') {
+    if (movementKeys.has(event.code)) {
       event.preventDefault();
       keys.add(event.code);
     }
     if (event.repeat) return;
-    if (event.code === 'Digit1') options.setMode('overview');
-    if (event.code === 'Digit2') options.setMode('walk');
-    if (event.code === 'Digit3') options.setMode('fly');
+    if (event.code === 'KeyF') options.toggleFlight();
     if (event.code === 'KeyR') options.reset();
   });
   window.addEventListener('keyup', event => keys.delete(event.code));

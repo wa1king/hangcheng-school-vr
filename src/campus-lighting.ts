@@ -569,7 +569,7 @@ export function createCampusLighting(
   function update(mode: Mode, feet: THREE.Vector3 | undefined, firstFramePresented: boolean, dt: number) {
     camera.getWorldPosition(sky.position);
     if (firstFramePresented && !photographicAssetsStarted) startPhotographicAssets();
-    localReflections?.update(firstFramePresented && photoSkySettled && mode !== 'overview');
+    localReflections?.update(firstFramePresented && photoSkySettled);
     if (photographicExposure) {
       const openSky = mode === 'walk' ? bakedLight?.skyVisibilityAt(sky.position) ?? 1 : 1;
       const exposure = baseExposure + 0.24 * (1 - THREE.MathUtils.smoothstep(openSky, .04, .65));

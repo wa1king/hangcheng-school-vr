@@ -6,13 +6,13 @@
     <meta name="theme-color" content="#142926" />
     <link rel="icon" href="data:," />
     <title>航城学校 · 3D 校园</title>
-    <script type="module" crossorigin src="./assets/index-DOfqZWiL.js"></script>
-    <link rel="modulepreload" crossorigin href="./assets/three-runtime-CV2Ouew1.js">
-    <link rel="stylesheet" crossorigin href="./assets/index-ARDzTgMP.css">
+    <script type="module" crossorigin src="./assets/index-6skK1Aip.js"></script>
+    <link rel="modulepreload" crossorigin href="./assets/three-runtime-DnJHqhY-.js">
+    <link rel="stylesheet" crossorigin href="./assets/index-cDRi9sLF.css">
     <link rel="preload" as="fetch" href="./scene/campus.glb?v=95fe6b9192fc" crossorigin="anonymous" fetchpriority="low">
   </head>
   <body>
-    <main id="app" data-mode="overview">
+    <main id="app" data-mode="walk">
       <div id="viewport" aria-label="三维校园场景"></div>
       <div class="shade" aria-hidden="true"></div>
       <header class="header">
@@ -24,21 +24,7 @@
             <p id="campus-orientation">从正门向北进校，向南看航城文体公园</p>
           </div>
         </div>
-        <div class="utilities">
-          <button id="vr" class="utility" type="button" hidden>头显 VR</button>
-          <button id="fullscreen" class="utility" type="button" hidden><span class="fullscreen-glyph" aria-hidden="true"></span>全屏</button>
-          <button id="about" class="utility" type="button" aria-expanded="false" aria-controls="about-panel">资料</button>
-        </div>
       </header>
-      <div id="direction-controls" class="direction-controls" role="group" aria-label="视角方向" hidden>
-        <button type="button" data-turn="left" title="向左转 90°">左转</button>
-        <button type="button" data-heading="north" aria-label="面向北" aria-pressed="true">北</button>
-        <button type="button" data-heading="east" aria-label="面向东" aria-pressed="false">东</button>
-        <button type="button" data-heading="south" aria-label="面向南" aria-pressed="false">南</button>
-        <button type="button" data-heading="west" aria-label="面向西" aria-pressed="false">西</button>
-        <button type="button" data-turn="right" title="向右转 90°">右转</button>
-        <span id="turn-status" class="turn-status" aria-live="polite"></span>
-      </div>
       <aside id="about-panel" class="about-panel" hidden aria-label="场景资料">
         <h2>场景资料</h2>
         <p id="description"></p>
@@ -50,34 +36,46 @@
         <span id="notice-detail">读取场景和可步行区域</span>
         <button id="retry" class="utility" type="button" hidden>重新加载</button>
       </section>
-      <div id="reticle" aria-hidden="true" hidden></div>
-      <div id="move-pad" class="move-pad" role="group" aria-label="拖动摇杆移动视角" hidden>
-        <span class="move-tick move-up" aria-hidden="true">▴</span>
-        <span class="move-tick move-right" aria-hidden="true">▸</span>
-        <span class="move-tick move-down" aria-hidden="true">▾</span>
-        <span class="move-tick move-left" aria-hidden="true">◂</span>
-        <span id="move-thumb" aria-hidden="true">移动</span>
-      </div>
-      <div id="vertical-buttons" class="vertical-buttons" hidden>
-        <button type="button" data-lift="1" aria-label="上升">↑</button>
-        <button type="button" data-lift="-1" aria-label="下降">↓</button>
-      </div>
-      <div class="location" id="location-wrap" hidden>
-        <label for="location">前往</label>
-        <select id="location" aria-label="前往场景地点">
-          <option value="">选择地点</option>
-        </select>
-      </div>
-      <div class="hud-bottom">
-        <p id="controls-hint" class="controls-hint" aria-live="polite" hidden></p>
-        <div class="mode-controls" aria-label="游览方式" role="group">
-          <button type="button" data-mode="overview" disabled aria-pressed="true"><span aria-hidden="true">▦</span>总览</button>
-          <button type="button" data-mode="walk" disabled aria-pressed="false"><span aria-hidden="true">◎</span>步行</button>
-          <button type="button" data-mode="fly" disabled aria-pressed="false"><span aria-hidden="true">↗</span>飞行</button>
-          <button type="button" id="reset" disabled aria-label="回到起点" title="回到起点"><span aria-hidden="true">↺</span><span class="reset-label">复位</span></button>
+      <!-- Everything a visitor touches sits along the bottom edge, within reach on a wall display. -->
+      <div class="dock">
+        <div class="dock-side dock-left">
+          <div id="move-pad" class="move-pad" role="group" aria-label="拖动摇杆移动" hidden>
+            <span class="move-tick move-up" aria-hidden="true">▴</span>
+            <span class="move-tick move-right" aria-hidden="true">▸</span>
+            <span class="move-tick move-down" aria-hidden="true">▾</span>
+            <span class="move-tick move-left" aria-hidden="true">◂</span>
+            <span id="move-thumb" aria-hidden="true">移动</span>
+          </div>
+        </div>
+        <div class="dock-centre">
+          <div id="places" class="places" role="group" aria-label="前往地点" hidden></div>
+          <p id="controls-hint" class="controls-hint" aria-live="polite" hidden></p>
+          <div class="tools" role="group" aria-label="游览工具">
+            <button type="button" id="places-toggle" disabled aria-expanded="false" aria-controls="places"><span aria-hidden="true">⌖</span>前往</button>
+            <button type="button" id="reset" disabled title="回到学校正门"><span aria-hidden="true">↺</span>回正门</button>
+            <button type="button" id="about" aria-expanded="false" aria-controls="about-panel"><span aria-hidden="true">ⓘ</span>资料</button>
+            <button type="button" id="fullscreen" hidden><span class="fullscreen-glyph" aria-hidden="true"></span>全屏</button>
+            <button type="button" id="vr" hidden>头显 VR</button>
+          </div>
+        </div>
+        <div class="dock-side dock-right">
+          <button type="button" id="compass" class="compass" aria-label="指南针，点击转向正北" hidden>
+            <span class="compass-dial" aria-hidden="true">
+              <b class="compass-n">北</b><b class="compass-e">东</b><b class="compass-s">南</b><b class="compass-w">西</b>
+            </span>
+            <span class="compass-pointer" aria-hidden="true"></span>
+            <span id="compass-label" class="compass-label" aria-live="polite">朝北</span>
+          </button>
+          <div id="vertical-buttons" class="vertical-buttons" hidden>
+            <button type="button" data-lift="1" aria-label="上升">↑</button>
+            <button type="button" data-lift="-1" aria-label="下降">↓</button>
+          </div>
+          <button type="button" id="fly-toggle" class="fly-toggle" disabled aria-pressed="false">
+            <span class="fly-glyph" aria-hidden="true">✈</span><span id="fly-label">飞行</span>
+          </button>
         </div>
       </div>
-      <span id="site-version" class="site-version">版本 2026.11.12-222825</span>
+      <span id="site-version" class="site-version">版本 2026.11.13-094938</span>
       <a class="map-credit" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>
       <pre id="diagnostics" hidden aria-hidden="true"></pre>
     </main>

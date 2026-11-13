@@ -14,8 +14,8 @@ const CONTACT_OFFSET = 0.015;
 const STEP_HEIGHT = 0.26;
 const FIXED_STEP = 1 / 120;
 const SPRINT_EVIDENCE_SECONDS = .05;
-const WALK_SPEED = 1.3;
-const RUN_SPEED = 5.2;
+const WALK_SPEED = 3.4;
+const RUN_SPEED = 7.2;
 const GRAVITY = 18;
 const JUMP_SPEED = 5.5;
 
