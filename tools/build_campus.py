@@ -208,7 +208,7 @@ def main(target=BASE / 'public' / 'scene'):
     nearby, _ = read_data(BASE / 'evidence' / 'neighborhood-osm.geojson')
     add_surroundings(context, nearby)
     add_traffic(context, lines)
-    add_street_life(context, polygons, lines, BEDS)
+    add_street_life(context, lines)
     context.export(target / 'surroundings.glb')
     manifest(target, polygons, lines)
     print(f'Campus GLB: {count:,} triangles')

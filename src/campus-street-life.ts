@@ -1,10 +1,10 @@
-import { Group, type Object3D } from 'three';
-import { loadStreetPeople, type StreetPeopleRoute } from './campus-pedestrians.ts';
+import { Group, type Object3D, type Vector3 } from 'three';
+import { loadStreetPeople, type CampusPeopleRoute, type StreetPeopleRoute } from './campus-pedestrians.ts';
 import { createCampusTraffic, streetTrafficPhase } from './campus-traffic.ts';
 import { moveStreetVehicles, type StreetLane } from './street-vehicle-motion.ts';
 import { loadStreetVehicleModels } from './street-vehicle-model.ts';
 
-type StreetRoutes = { vehicles: StreetLane[]; people: StreetPeopleRoute[] };
+type StreetRoutes = { vehicles: StreetLane[]; people: StreetPeopleRoute[]; campusPeople?: CampusPeopleRoute[] };
 
 export function createStreetLife(context: Object3D, manifestURL: URL, routesPath: string | undefined,
   lightVehicles: (vehicles: Object3D) => void) {
@@ -34,7 +34,7 @@ export function createStreetLife(context: Object3D, manifestURL: URL, routesPath
         lightVehicles(vehicles);
       }),
       loadRoutes.then(async routes => {
-        updatePeople = await loadStreetPeople(people, manifestURL, routes.people);
+        updatePeople = await loadStreetPeople(people, manifestURL, routes.people, routes.campusPeople);
       }),
     ]).then(results => {
       if (updateVehicles) context.add(vehicles);
@@ -47,13 +47,13 @@ export function createStreetLife(context: Object3D, manifestURL: URL, routesPath
   }
 
   // Actors and lamps share simulation time, including on slow devices.
-  return (dt: number) => {
+  return (dt: number, cameraPosition: Vector3) => {
     if (ready) elapsed += dt * 1000;
     const { phase, canCross } = streetTrafficPhase(elapsed);
     setSignal?.(phase);
     if (ready) {
       updateVehicles?.(dt, phase.aviation);
-      updatePeople?.(dt, elapsed, canCross);
+      updatePeople?.(dt, elapsed, canCross, cameraPosition);
     }
   };
 }

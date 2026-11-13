@@ -422,7 +422,7 @@ function frame(time: number, xrFrame?: XRFrame) {
   }
   const feet = mode === 'walk' ? player?.position : flightFeet;
   lighting?.update(mode, feet, firstFramePresented, dt);
-  streetLife?.(dt);
+  streetLife?.(dt, xrSession ? rig.position : camera.position);
   pavement?.update(camera, time, finished && mode === 'walk');
   if (finished && !input.touch && !renderer.xr.isPresenting && campusRenderer) {
     campusRenderer.render(scene, camera);

@@ -3,6 +3,7 @@
 from shapely.geometry import LineString, Point
 from shapely.ops import substring
 
+from campus_people import build_campus_people
 from street_traffic import ROAD_LEVEL, street_axes
 
 
@@ -48,4 +49,4 @@ def build_street_routes(lines, world):
         if wait is not None:
             route.update(waitAt=wait, crossingEnd=end)
         people.append(route)
-    return {'vehicles': vehicles, 'people': people}
+    return {'vehicles': vehicles, 'people': people, 'campusPeople': build_campus_people(world)}

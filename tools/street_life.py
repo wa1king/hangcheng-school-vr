@@ -14,15 +14,13 @@ from io import BytesIO
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
-from shapely.geometry import Point, Polygon, box
-from shapely.ops import unary_union
+from shapely.geometry import Point
 
 from architecture import branch
 from street_traffic import AVIATION_HALF_WIDTH, ROAD_LEVEL, street_axes
 
 WALK = -.041       # Top of the footway beside the road.
 FORECOURT = .007
-CAMPUS = -.03
 GATE = (-2.1, 33.0)   # Forecourt opening along the road, site x.
 BUS_BAY = (48.5, 60.5)
 FONTS = Path('C:/Windows/Fonts')
@@ -81,9 +79,6 @@ def sign_textures():
     draw.text((128, 32), '前方学校', font=font(34), anchor='mm', fill=(24, 24, 24))
     draw.text((128, 70), '减速慢行', font=font(30), anchor='mm', fill=(24, 24, 24))
 
-    vest = Image.new('RGB', (128, 64), (200, 36, 34))
-    draw = ImageDraw.Draw(vest)
-    draw.text((64, 30), '志愿者', font=font(30), anchor='mm', fill=(250, 232, 96))
     wheel = Image.new('RGBA', (128, 128))
     draw = ImageDraw.Draw(wheel)
     draw.ellipse((3, 3, 124, 124), outline=(28, 29, 30), width=9)
@@ -93,7 +88,7 @@ def sign_textures():
         draw.line((64, 64, 64 + 50 * math.cos(angle), 64 + 50 * math.sin(angle)), fill=(170, 174, 176), width=1)
     draw.ellipse((57, 57, 71, 71), fill=(60, 62, 64))
     return {'bike-wheel': png(wheel), 'sign-children': png(children), 'sign-limit': png(limit), 'sign-road-name': png(name),
-            'sign-bus-stop': png(stop), 'sign-school-zone': png(zone), 'vest-print': png(vest)}
+            'sign-bus-stop': png(stop), 'sign-school-zone': png(zone)}
 
 
 def register_materials(mesh):
@@ -109,16 +104,6 @@ def register_materials(mesh):
         ('bench-wood', (150, 112, 76), .7, 0), ('tyre', (30, 31, 32), .85, 0),
         ('bike-yellow', (240, 196, 30), .5, .1), ('bike-blue', (40, 132, 214), .5, .1),
         ('bike-green', (60, 178, 110), .5, .1), ('car-glass', (40, 54, 62), .2, .2),
-        ('cloth-white', (232, 233, 230), .85, 0),
-        ('skin', (226, 184, 150), .8, 0), ('skin-tan', (198, 152, 116), .8, 0),
-        ('hair', (34, 30, 30), .9, 0), ('uniform-white', (238, 240, 240), .8, 0),
-        ('uniform-blue', (38, 82, 160), .8, 0), ('uniform-navy', (30, 46, 92), .8, 0),
-        ('vest-red', (200, 36, 34), .7, 0), ('vest-band', (236, 220, 80), .5, 0),
-        ('guard-navy', (34, 42, 66), .8, 0), ('cloth-grey', (120, 126, 134), .8, 0),
-        ('cloth-khaki', (176, 156, 120), .8, 0), ('cloth-teal', (58, 128, 132), .8, 0),
-        ('cloth-pink', (214, 142, 150), .8, 0), ('cloth-dark', (52, 56, 64), .8, 0),
-        ('bag-red', (196, 56, 60), .7, 0), ('bag-blue', (48, 110, 196), .7, 0),
-        ('bag-yellow', (232, 190, 60), .7, 0), ('bag-purple', (132, 96, 176), .7, 0),
     ):
         mesh.material(name, rgb, roughness, metallic, double=True)
 
@@ -282,119 +267,11 @@ def bicycle(mesh, x, z, heading, base, colour):
     mesh.box(colour, kx, base + .72, kz, .26, .2, .3, heading)
 
 
-OUTFITS = {
-    # top, yoke, sleeve, trousers, cap
-    'pupil': ('uniform-white', 'uniform-blue', 'uniform-blue', 'uniform-navy', None),
-    'volunteer': ('vest-red', 'vest-red', 'cloth-grey', 'cloth-dark', 'vest-red'),
-    'guard': ('guard-navy', 'guard-navy', 'guard-navy', 'guard-navy', 'guard-navy'),
-}
-ADULT_TOPS = ('cloth-grey', 'cloth-khaki', 'cloth-teal', 'cloth-pink', 'cloth-white', 'cloth-dark')
-BAGS = ('bag-red', 'bag-blue', 'bag-yellow', 'bag-purple')
-
-
-def person(mesh, x, z, heading, height, kind, rng, base, walking=None):
-    """A low-polygon figure. Pupils wear the Shenzhen blue-and-white school uniform."""
-    if kind in OUTFITS:
-        top, yoke, sleeve, trousers, cap = OUTFITS[kind]
-    else:
-        top = yoke = sleeve = rng.choice(ADULT_TOPS)
-        trousers, cap = rng.choice(('cloth-dark', 'uniform-navy', 'cloth-grey')), None
-    skin = rng.choice(('skin', 'skin', 'skin-tan'))
-    walking = rng.random() < .55 if walking is None else walking
-    stride = (.17 if walking else .02) * height * rng.choice((-1, 1))
-    h = height
-
-    def point(forward, right, up):
-        px, pz = place(x, z, heading, forward, right)
-        return px, base + up * h, pz
-
-    shorts = kind == 'pupil' and rng.random() < .6
-    for side, swing in ((-1, stride), (1, -stride)):
-        hip, knee, foot = point(0, side * .055 * h, .47), point(swing * .5, side * .06 * h, .25), point(swing, side * .065 * h, 0)
-        branch(mesh, hip, knee, .052 * h, .042 * h, trousers, 5)
-        branch(mesh, knee, foot, .04 * h, .032 * h, skin if shorts else trousers, 5)
-        shoulder = point(0, side * .125 * h, .79)
-        elbow = point(-swing * .45, side * .15 * h, .63)
-        hand = point(-swing * .9, side * .15 * h, .47)
-        branch(mesh, shoulder, elbow, .036 * h, .032 * h, sleeve, 5)
-        branch(mesh, elbow, hand, .03 * h, .026 * h, skin, 5)
-    branch(mesh, point(0, 0, .45), point(0, 0, .69), .098 * h, .108 * h, top, 7)
-    branch(mesh, point(0, 0, .69), point(0, 0, .82), .108 * h, .09 * h, yoke, 7)
-    branch(mesh, point(0, 0, .82), point(0, 0, .86), .034 * h, .034 * h, skin, 5)
-    # Chin, cheeks and crown give the head a rounded outline from every side.
-    branch(mesh, point(.004 * h, 0, .855), point(.004 * h, 0, .9), .04 * h, .06 * h, skin, 8)
-    branch(mesh, point(.004 * h, 0, .9), point(.004 * h, 0, .955), .06 * h, .061 * h, skin, 8)
-    crown = cap or 'hair'
-    branch(mesh, point(-.004 * h, 0, .95), point(-.004 * h, 0, .985), .066 * h, .058 * h, crown, 8)
-    branch(mesh, point(-.004 * h, 0, .985), point(-.004 * h, 0, 1.0), .058 * h, .03 * h, crown, 8)
-    # Hair comes down behind the ears.
-    bx, bz = place(x, z, heading, -.034 * h, 0)
-    mesh.box('hair', bx, base + .895 * h, bz, .06 * h, .06 * h, .112 * h, heading)
-    if cap:
-        bx, bz = place(x, z, heading, .075 * h, 0)
-        mesh.box(cap, bx, base + .95 * h, bz, .09 * h, .012 * h, .12 * h, heading)
-    if kind == 'pupil' and rng.random() < .7:
-        bx, bz = place(x, z, heading, -.135 * h, 0)
-        mesh.box(rng.choice(BAGS), bx, base + .56 * h, bz, .1 * h, .24 * h, .2 * h, heading)
-    if kind == 'volunteer':
-        branch(mesh, point(0, 0, .58), point(0, 0, .61), .109 * h, .11 * h, 'vest-band', 7)
-        a, b = point(-.112 * h, -.07 * h, .0), point(-.112 * h, .07 * h, .0)
-        mesh.face('vest-print', [(a[0], base + .66 * h, a[2]), (a[0], base + .76 * h, a[2]),
-                                 (b[0], base + .76 * h, b[2]), (b[0], base + .66 * h, b[2])],
-                  uv=[(0, 1), (0, 0), (1, 0), (1, 1)])
-        # A small guiding flag held out toward the crossing.
-        grip, tip = point(.1 * h, .17 * h, .5), point(.2 * h, .2 * h, 1.02)
-        branch(mesh, grip, tip, .008, .008, 'pole-grey', 4)
-        low = point(.17 * h, .19 * h, .86)
-        far = point(.36 * h, .25 * h, .92)
-        mesh.face('rail-yellow', [low, tip, (far[0], far[1] + .08 * h, far[2]), far])
-
-
-def scatter(rng, centre, radius, count, allowed, spacing=.75):
-    """Random standing spots inside the allowed area, kept apart from each other."""
-    spots = []
-    for _ in range(count * 40):
-        if len(spots) == count:
-            break
-        angle, reach = rng.uniform(0, math.tau), radius * math.sqrt(rng.random())
-        x, z = centre[0] + reach * math.cos(angle), centre[1] + reach * math.sin(angle)
-        if allowed.covers(Point(x, z)) and all(math.hypot(x - a, z - b) > spacing for a, b in spots):
-            spots.append((x, z))
-    return spots
-
-
-def campus_people(mesh, polygons, campus, beds, rng):
-    buildings = unary_union([Polygon(polygons[ident][0]).buffer(1.6)
-                             for ident in (19808442, 1448555207, 1448555203, 1448555206)])
-    planting = unary_union([box(x - w / 2 - .6, z - d / 2 - .6, x + w / 2 + .6, z + d / 2 + .6) for x, z, w, d in beds])
-    steps = box(-3, 24, 24.5, 56.5)
-    open_ground = Polygon(campus).buffer(-1.5).difference(unary_union([buildings, planting, steps]))
-    # Groups gather where pupils do at break: the gate plaza, the courtyard ends,
-    # the ball courts and the field.
-    for centre, radius, count in (((16, 66), 8.5, 12), ((11, 16), 4.5, 7), ((11, -9), 4, 6), ((44, 34), 6, 8),
-                                  ((58, -42), 9, 10), ((27, -62), 8, 10), ((-30, 44), 7, 7),
-                                  ((-72, -22), 24, 22), ((-52, 20), 7, 6)):
-        spots = scatter(rng, centre, radius, count, open_ground)
-        for index, (x, z) in enumerate(spots):
-            # Pupils face a nearby friend more often than a random direction.
-            if index and rng.random() < .6:
-                ox, oz = spots[index - 1]
-                heading = math.atan2(oz - z, ox - x)
-            else:
-                heading = rng.uniform(0, math.tau)
-            person(mesh, x, z, heading, rng.uniform(1.16, 1.5), 'pupil', rng, CAMPUS)
-    # A teacher on duty in each large group.
-    for x, z in ((20, 60), (-60, -10), (50, -36)):
-        if open_ground.covers(Point(x, z)):
-            person(mesh, x, z, rng.uniform(0, math.tau), 1.66, 'adult', rng, CAMPUS, walking=False)
-
-
-def add_street_life(mesh, polygons, lines, beds):
+def add_street_life(mesh, lines):
     register_materials(mesh)
     rng = random.Random(2026)
     road = Road(lines)
     edge = AVIATION_HALF_WIDTH
-    campus = polygons[1084438083][0]
 
     # Rails follow the kerb and open at the gate, the bus bay and the junctions.
     for start, stop in ((-124, GATE[0] - .6), (GATE[1] + .6, BUS_BAY[0]), (BUS_BAY[1], 90)):
@@ -437,25 +314,3 @@ def add_street_life(mesh, polygons, lines, beds):
             lean = rng.uniform(-.12, .12)
             bicycle(mesh, *road.at(x, edge + 1.55 + rng.uniform(-.05, .05)),
                     road.heading(x) + math.pi / 2 + lean, WALK, rng.choice(('bike-yellow', 'bike-yellow', 'bike-blue', 'bike-green')))
-
-    # Volunteers in red vests stand at the kerb on both sides of the gate.
-    for x, toward, turn in ((GATE[0] + 1.0, edge + 1.3, .3), (GATE[0] + 9.6, edge + .95, -.2),
-                            (GATE[1] - 9.6, edge + .95, .2), (GATE[1] - 1.0, edge + 1.3, -.3)):
-        px, pz = road.at(x, toward)
-        person(mesh, px, pz, road.heading(x) + math.pi / 2 + turn, rng.uniform(1.6, 1.74), 'volunteer', rng,
-               FORECOURT, walking=False)
-    for x, z in ((4.6, 61.5), (17.2, 61.5)):
-        person(mesh, x, z, math.pi / 2, 1.74, 'guard', rng, FORECOURT, walking=False)
-
-    # Parents walk pupils in across the forecourt and wait at the bus stop.
-    forecourt = box(GATE[0] + 1, 63, GATE[1] - 1, 83)
-    for x, z in scatter(rng, (15.5, 77), 12, 9, forecourt, 1.9):
-        heading = -math.pi / 2 + rng.uniform(-.35, .35)
-        person(mesh, x, z, heading, rng.uniform(1.56, 1.76), 'adult', rng, FORECOURT, walking=True)
-        cx, cz = place(x, z, heading, rng.uniform(-.1, .2), rng.choice((-.5, .5)))
-        person(mesh, cx, cz, heading, rng.uniform(1.14, 1.4), 'pupil', rng, FORECOURT, walking=True)
-    for along in (-2.4, -.6, 1.5, 2.9):
-        px, pz = road.at(54.5 + along, edge + 1.25)
-        person(mesh, px, pz, road.heading(54.5) - math.pi / 2 + rng.uniform(-.5, .5), rng.uniform(1.55, 1.75),
-               'adult', rng, WALK, walking=False)
-    campus_people(mesh, polygons, campus, beds, rng)

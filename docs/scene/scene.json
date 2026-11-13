@@ -8,11 +8,11 @@
       "url": "./campus.glb?v=b1a409a40e5b"
     },
     {
-      "url": "./surroundings.glb?v=33c1233f1278",
+      "url": "./surroundings.glb?v=422b303f5989",
       "surroundings": true
     }
   ],
-  "streetRoutes": "./street-routes.json?v=efb6136af632",
+  "streetRoutes": "./street-routes.json?v=3e5599d4dc0e",
   "collisionFromModels": true,
   "tourBoundary": [
     [
