@@ -5,10 +5,10 @@
   "northYaw": 0.41887902,
   "models": [
     {
-      "url": "./campus.glb?v=b1a409a40e5b"
+      "url": "./campus.glb?v=8b6bad89cc12"
     },
     {
-      "url": "./surroundings.glb?v=422b303f5989",
+      "url": "./surroundings.glb?v=53c922b5eb47",
       "surroundings": true
     }
   ],

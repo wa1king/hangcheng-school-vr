@@ -126,7 +126,7 @@ varying vec3 vCampusBakeWorld;`).replace(`#include <project_vertex>`,`
         vec3 skyColor = mix(uHorizon, photograph, smoothstep(-0.01, 0.15, ray.y));
         gl_FragColor = vec4(skyColor, 1.0);
         #include <colorspace_fragment>
-      }`,side:1,depthTest:!1,depthWrite:!1,toneMapped:!1}),texture:t}}var Pe=new Map([[`plaza`,[`pavers`,.31,.26,.0022]],[`walk`,[`pavers`,.3,.22,.0022]],[`street-paving`,[`stone`,.26,.12,.0024]],[`street-curb`,[`stone`,.32,.07,.002]],[`street-verge`,[`scanned`,.29,.02,.0018]],[`street-soil`,[`scanned`,.33,.03,.0028]],[`plaza-inlay`,[`stone`,.23,.13,.0015]],[`courtyard-paving`,[`pavers`,.33,.24,.0022]],[`teaching-floor`,[`pavers`,.16,.38,8e-4]],[`beige`,[`masonry`,.23,.06,.0012]],[`terra`,[`masonry`,.29,.08,.0014]],[`road`,[`scanned`,.35,.14,.0034]],[`teaching-wall`,[`scanned`,.1,.02,5e-4]],[`teaching-ceiling`,[`scanned`,.075,.02,5e-4]],[`soffit`,[`scanned`,.2,.04,.0012]],[`cream`,[`scanned`,.17,.05,9e-4]],[`reveal`,[`scanned`,.19,.04,8e-4]],[`entry-stone`,[`stone`,.22,.27,.0016]],[`entry-nosing`,[`stone`,.19,.2,.0012]],[`entry-traction`,[`stone`,.23,.12,.0022]],[`stair-stone`,[`stone`,.13,.27,.0011]],[`gallery-base-stone`,[`stone`,.17,.15,.001]],[`curb`,[`stone`,.27,.09,.0026]],[`plinth`,[`stone`,.3,.1,.0018]],[`apron`,[`stone`,.34,.06,.0024]],[`decal-brickline`,[`stone`,.27,.19,.0015]],[`decal-paint-yellow`,[`paint`,.25,.12,0]],[`decal-paint-white`,[`paint`,.21,.1,0]],[`decal-sports_paint`,[`paint`,.14,.09,0]]]),Fe=new Set([`road`,`street-paving`,`street-curb`,`walk`,`plaza-inlay`]),Ie=`
+      }`,side:1,depthTest:!1,depthWrite:!1,toneMapped:!1}),texture:t}}var Pe=new Map([[`plaza`,[`pavers`,.31,.26,.0022]],[`walk`,[`pavers`,.3,.22,.0022]],[`street-paving`,[`stone`,.26,.12,.0024]],[`street-curb`,[`stone`,.32,.07,.002]],[`street-verge`,[`scanned`,.29,.02,.0018]],[`street-soil`,[`scanned`,.33,.03,.0028]],[`plaza-inlay`,[`stone`,.23,.13,.0015]],[`courtyard-paving`,[`pavers`,.33,.24,.0022]],[`teaching-floor`,[`pavers`,.16,.38,8e-4]],[`beige`,[`stone`,.23,.06,.0012]],[`terra`,[`stone`,.29,.08,.0014]],[`road`,[`scanned`,.35,.14,.0034]],[`teaching-wall`,[`scanned`,.1,.02,5e-4]],[`teaching-ceiling`,[`scanned`,.075,.02,5e-4]],[`soffit`,[`scanned`,.2,.04,.0012]],[`cream`,[`scanned`,.17,.05,9e-4]],[`reveal`,[`scanned`,.19,.04,8e-4]],[`entry-stone`,[`stone`,.22,.27,.0016]],[`entry-nosing`,[`stone`,.19,.2,.0012]],[`entry-traction`,[`stone`,.23,.12,.0022]],[`stair-stone`,[`stone`,.13,.27,.0011]],[`gallery-base-stone`,[`stone`,.17,.15,.001]],[`curb`,[`stone`,.27,.09,.0026]],[`plinth`,[`stone`,.3,.1,.0018]],[`apron`,[`stone`,.34,.06,.0024]],[`decal-brickline`,[`stone`,.27,.19,.0015]],[`decal-paint-yellow`,[`paint`,.25,.12,0]],[`decal-paint-white`,[`paint`,.21,.1,0]],[`decal-sports_paint`,[`paint`,.14,.09,0]]]),Fe=new Set([`road`,`street-paving`,`street-curb`,`walk`,`plaza-inlay`]),Ie=`
   #include <lights_physical_pars_fragment>
   void campusLeafDirect(
     const in IncidentLight light, const in vec3 position, const in vec3 normal,
@@ -202,17 +202,10 @@ varying vec3 vCampusBakeWorld;`).replace(`#include <project_vertex>`,`
   float campusJoint = 0.0;
   float campusTileShade = .5;
 
-  #if defined(USE_MAP) && (defined(CAMPUS_PAVERS) || defined(CAMPUS_MASONRY))
-    // Keep tile and mortar edges at the same locations as the scans.
-    #ifdef CAMPUS_PAVERS
-      vec2 campusTile = vMapUv * 5.0 - vec2(.477, 0.0);
-      float campusWidth = .012;
-    #else
-      vec2 campusTile = vMapUv * vec2(16.0, 32.0);
-      campusTile.x += mod(floor(campusTile.y), 2.0) * .5;
-      float campusWidth = .026;
-    #endif
-    campusJoint = campusJointMask(campusTile, campusWidth);
+  #if defined(USE_MAP) && defined(CAMPUS_PAVERS)
+    // Keep the paving joint response aligned with the stone scan.
+    vec2 campusTile = vMapUv * 5.0 - vec2(.477, 0.0);
+    campusJoint = campusJointMask(campusTile, .012);
     float campusSlabFade = 1.0 - smoothstep(.05, .21, campusFootprint);
     campusTileShade = mix(.5, campusHash(floor(campusTile) + 23.7), campusSlabFade * (1.0 - campusJoint));
   #endif

@@ -32,6 +32,8 @@
 
 周边楼体的立面贴图在 `tools/facade_photos`，由 `tools/prepare_facade_photos.py` 从 Wikimedia Commons 的 CC0 深圳街拍照片校正裁切生成，来源见该目录的 `SOURCES.md`。`tools/street_life.py` 生成护栏、路灯、公交站和共享单车。
 
+航城学校本部的墙砖、校名和钟面照片贴图及原图链接在 `tools/school_photos`。`tools/facade_photos` 也收录领航公园跑道、广场石材和领航文体中心窗带、门厅及招牌的实拍贴图。公园和文体中心体量按总平面图和建成后的照片估建。
+
 更新场景模型或主光后，运行 `node tools/bake-campus-light.mjs` 重新生成 `public/scene/campus-baked-light.bin`。它按 `scene.json` 对应的模型版本生成，浏览器在首帧后加载。
 
 ## 数据与署名

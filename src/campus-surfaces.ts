@@ -1,6 +1,6 @@
 import type { MeshStandardMaterial } from 'three';
 
-type SurfaceFamily = 'pavers' | 'masonry' | 'scanned' | 'stone' | 'paint';
+type SurfaceFamily = 'pavers' | 'scanned' | 'stone' | 'paint';
 type SurfaceResponse = [family: SurfaceFamily, soil: number, polish: number, reliefMetres: number];
 
 // Soil is reflected in color and roughness. Relief is physical height and
@@ -15,8 +15,8 @@ const surfaces = new Map<string, SurfaceResponse>([
   ['plaza-inlay', ['stone', .23, .13, .0015]],
   ['courtyard-paving', ['pavers', .33, .24, .0022]],
   ['teaching-floor', ['pavers', .16, .38, .0008]],
-  ['beige', ['masonry', .23, .06, .0012]],
-  ['terra', ['masonry', .29, .08, .0014]],
+  ['beige', ['stone', .23, .06, .0012]],
+  ['terra', ['stone', .29, .08, .0014]],
   ['road', ['scanned', .35, .14, .0034]],
   ['teaching-wall', ['scanned', .10, .02, .0005]],
   ['teaching-ceiling', ['scanned', .075, .02, .0005]],
@@ -119,17 +119,10 @@ const fields = /* glsl */`
   float campusJoint = 0.0;
   float campusTileShade = .5;
 
-  #if defined(USE_MAP) && (defined(CAMPUS_PAVERS) || defined(CAMPUS_MASONRY))
-    // Keep tile and mortar edges at the same locations as the scans.
-    #ifdef CAMPUS_PAVERS
-      vec2 campusTile = vMapUv * 5.0 - vec2(.477, 0.0);
-      float campusWidth = .012;
-    #else
-      vec2 campusTile = vMapUv * vec2(16.0, 32.0);
-      campusTile.x += mod(floor(campusTile.y), 2.0) * .5;
-      float campusWidth = .026;
-    #endif
-    campusJoint = campusJointMask(campusTile, campusWidth);
+  #if defined(USE_MAP) && defined(CAMPUS_PAVERS)
+    // Keep the paving joint response aligned with the stone scan.
+    vec2 campusTile = vMapUv * 5.0 - vec2(.477, 0.0);
+    campusJoint = campusJointMask(campusTile, .012);
     float campusSlabFade = 1.0 - smoothstep(.05, .21, campusFootprint);
     campusTileShade = mix(.5, campusHash(floor(campusTile) + 23.7), campusSlabFade * (1.0 - campusJoint));
   #endif

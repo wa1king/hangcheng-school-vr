@@ -5,9 +5,10 @@ from io import BytesIO
 from pathlib import Path
 
 from PIL import Image
-from shapely.geometry import Polygon
+from shapely.geometry import LineString, Polygon, box
 from shapely.geometry.polygon import orient
 
+from architecture import slab
 from mesh import rect
 from neighborhood_park import add_culture_terraces, add_neighborhood_park
 
@@ -119,6 +120,102 @@ def shell(mesh, outline, height, floors, family, seed, equipment=True):
              room_depth * size, angle, top='context-coping')
 
 
+def culture_center(mesh, footprint):
+    """The open terraces and pitched foyer frame shown in the park photos."""
+    outline = orient(Polygon(footprint).simplify(.13, preserve_topology=True), sign=1)
+    court_wing = outline.intersection(box(-100, 167.72, -74.5, 201))
+    main = outline.difference(court_wing)
+    for name, file, roughness, metallic in (
+        ('culture-glazing', 'linghang-center-glazing.jpg', .45, .12),
+        ('culture-foyer', 'linghang-center-entry.jpg', .43, .1),
+        ('culture-sign', 'linghang-center-sign.png', .84, 0),
+    ):
+        mime = 'image/png' if file.endswith('.png') else 'image/jpeg'
+        mesh.material(name, (255, 255, 255), roughness, metallic, texture=(PHOTOS.joinpath(file).read_bytes(), mime))
+    stone = (SCANS.joinpath('plaster-color.jpg').read_bytes(), 'image/jpeg')
+    mesh.material('culture-concrete', (233, 230, 212), .93, texture=stone)
+    mesh.material('culture-soffit', (88, 90, 82), .90)
+    mesh.material('culture-railing', (107, 118, 113), .54, .23)
+    mesh.material('culture-paving', (255, 255, 255), .95,
+                  texture=(PHOTOS.joinpath('park-paving.jpg').read_bytes(), 'image/jpeg'))
+    slab(mesh, outline.buffer(1.5, join_style='mitre'), GROUND + .09, GROUND + .09, 'culture-paving')
+
+    def glazed_wall(polygon, bottom, top, floor):
+        ring = list(orient(polygon, sign=1).exterior.coords)
+        for a, b in zip(ring, ring[1:]):
+            edge = LineString((a, b))
+            span = edge.length
+            # Concrete cores interrupt the long runs of glass in the exterior photos.
+            breaks = [(0, span, 'culture-glazing')]
+            if span > 26:
+                first = span * (.35 if floor == 1 else .61)
+                last = first + min(6.2, span * .18)
+                breaks = [(0, first, 'culture-glazing'), (first, last, 'culture-concrete'),
+                          (last, span, 'culture-glazing')]
+            for start, end, material in breaks:
+                x, z = edge.interpolate(start).coords[0]
+                xx, zz = edge.interpolate(end).coords[0]
+                uv = None
+                if material == 'culture-glazing':
+                    repetitions = (end - start) / 6.8
+                    phase = floor * .27
+                    uv = [(phase, 1), (phase, 0), (phase + repetitions, 0), (phase + repetitions, 1)]
+                mesh.face(material, [(x, bottom, z), (x, top, z), (xx, top, zz), (xx, bottom, zz)], uv=uv)
+
+    def terrace(polygon, elevation, rail):
+        y = GROUND + elevation
+        slab(mesh, polygon, y - .86, y, 'culture-concrete')
+        slab(mesh, polygon.buffer(-.22, join_style='mitre'), y - .89, y - .86, 'culture-soffit')
+        if rail:
+            ring = list(polygon.buffer(-.17, join_style='mitre').exterior.coords)
+            for a, b in zip(ring, ring[1:]):
+                mesh.strip('culture-railing', a, b, .047, y + 1.02, .045)
+                posts = max(1, round(math.dist(a, b) / 1.6))
+                for i in range(posts):
+                    x = a[0] + (b[0] - a[0]) * i / posts
+                    z = a[1] + (b[1] - a[1]) * i / posts
+                    mesh.box('culture-railing', x, y, z, .035, 1.04, .035)
+
+    for polygon, roof in ((main, 15.4), (court_wing, 12.1)):
+        floor_levels = (0, 4.75, 9.75, roof)
+        for floor, (bottom, top) in enumerate(zip(floor_levels, floor_levels[1:])):
+            inset = (1.65, 2.38, 1.58)[floor]
+            wall = polygon.buffer(-inset, join_style='mitre')
+            glazed_wall(wall, GROUND + bottom, GROUND + top - .85, floor)
+            terrace(polygon if top == roof else polygon.buffer(-.24, join_style='mitre'), top, top < roof or roof > 13)
+
+    # The park-facing main entrance combines a two-storey glass opening and an inclined concrete frame.
+    x = -41.03
+    front = x + 1.25
+    lobby_a, lobby_b = 164.4, 146.1
+    mesh.face('culture-foyer', [(x, GROUND + .06, lobby_a + 1.3), (x, GROUND + .06, lobby_b),
+                                (x, GROUND + 8.80, lobby_b), (x, GROUND + 8.80, lobby_a - 2.9)],
+              uv=[(0, 1), (1, 1), (1, 0), (0, 0)])
+    mesh.box('culture-concrete', front - .60, GROUND + 8.36, (lobby_a + lobby_b) / 2 + .54,
+             1.24, .95, lobby_a - lobby_b + 3.1)
+    for z, incline in ((lobby_a + 2.3, -4.15), (lobby_b - 2.05, 0)):
+        outer = [(front, GROUND, z + .84), (front, GROUND, z - .84),
+                 (front, GROUND + 8.40, z + incline - .64), (front, GROUND + 8.40, z + incline + .64)]
+        inner = [(x - .19, y, pz) for _, y, pz in outer]
+        mesh.face('culture-concrete', outer)
+        for a, b in ((0, 1), (1, 2), (2, 3), (3, 0)):
+            mesh.face('culture-concrete', [outer[a], inner[a], inner[b], outer[b]])
+
+    # Wide stair flights and planters flank the glazed entrance, on the plaza side of the building.
+    for i in range(22):
+        step = (i + 1) * .205
+        mesh.box('culture-concrete', -36.40 - i * .39, GROUND + .095, 175.4, .40, step, 13.0)
+        if i % 5 == 0:
+            mesh.box('culture-concrete', -37.18 - i * .39, GROUND + step, 180.55, 1.95, .46, 2.18,
+                     top='context-landscape')
+
+    y = GROUND + 14.54
+    face_x = -40.885
+    mesh.face('culture-sign', [(face_x, y + .01, 153.4), (face_x, y + .01, 140.8),
+                               (face_x, y + 1.55, 140.8), (face_x, y + 1.55, 153.4)],
+              uv=[(0, 1), (1, 1), (1, 0), (0, 0)])
+
+
 def add_surroundings(mesh, polygons):
     grass = register_materials(mesh)
     # The outer ground continues below the existing school and road surfaces.
@@ -131,7 +228,7 @@ def add_surroundings(mesh, polygons):
             shell(mesh, polygons[ident][0], floors * storey + .95, floors, family, ident)
     # The design review for the cultural center specifies three floors and 15.40 m.
     cultural_center = polygons[1436051956][0]
-    shell(mesh, cultural_center, 15.4, 3, 'glass', 1436051956, equipment=False)
+    culture_center(mesh, cultural_center)
     paving = (SCANS.joinpath('floor-pavement-color.jpg').read_bytes(), 'image/jpeg')
     add_neighborhood_park(mesh, jpeg, grass, paving)
     add_culture_terraces(mesh, cultural_center, GROUND + 15.4)

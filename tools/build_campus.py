@@ -26,6 +26,7 @@ from street_trees import register_street_trees, street_tree
 from interiors import PORTAL_Z
 from material_scans import apply_surface_materials
 from mesh import Mesh, rect, rounded
+from school_photo_materials import apply_school_photo_materials
 from sports import add_sports
 from street_life import add_street_life
 from street_surfaces import build_street, ROADSIDE_TREE_X, ROADSIDE_TREE_Z
@@ -204,6 +205,7 @@ def main(target=BASE / 'public' / 'scene'):
     add_sports(visual, polygons)
     add_reference_structures(visual, polygons)
     apply_surface_materials(visual)
+    apply_school_photo_materials(visual)
     target.mkdir(parents=True, exist_ok=True)
     count = visual.export(target / 'campus.glb')
     context = Mesh(site_to_world)
